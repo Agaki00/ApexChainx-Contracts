@@ -66,18 +66,35 @@ This repository is the execution-layer side of the 3-repo architecture.
 | [apexchainx-fe](https://github.com/ApexChainx/apexchainx-fe) | Frontend application (React/TypeScript) |
 | [apexchainx-be](https://github.com/ApexChainx/apexchainx-be) | Backend API and contract bridge |
 
-## Documentation
+## Development Setup
 
-- **[Configuration Validation Rules](docs/config-validation.md)** — Parameter bounds, severity-specific rules, and cross-severity consistency.
-- **[Severity Compatibility Matrix](docs/severity-compatibility-matrix.md)** — Canonical vs. custom severity families, additive vs. breaking changes, release planning checklist.
-- **[Event Ordering Guarantees](docs/event-ordering-guarantees.md)** — Deterministic event sequencing contract for backend consumers.
-- **[Retention Benchmark Guidance](docs/retention-benchmark-guidance.md)** — `MAX_HISTORY_SIZE` tuning, retention trade-offs, and deployment-scale recommendations.
-- **[Audit Trail](docs/AUDIT_TRAIL.md)** — On-chain event audit trail structure and consumer guidance.
-- **[Project Context](docs/PROJECT_CONTEXT.md)** — System architecture, repository landscape, and future roadmap.
+### Quick Start with Dev Container (#281)
+
+A [dev container](.devcontainer/) is provided for GitHub Codespaces and VS Code:
+
+```bash
+# Open in Codespaces or VS Code — the devcontainer auto-configures:
+# - Rust toolchain + wasm32-unknown-unknown target
+# - just command runner
+# - Node.js + npx for tooling scripts
+```
+
+### Local Setup
+
+```bash
+# Bootstrap the dev environment
+just bootstrap
+
+# Run the full CI pipeline locally
+just ci
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup instructions.
 
 ## Security & Supply Chain
 
 - **[Release Artifact Provenance Policy](docs/RELEASE_PROVENANCE_POLICY.md)** — Guidelines for WASM output checksums and snapshot check-ins.
+- **[Release Summary Format](docs/RELEASE_SUMMARY_FORMAT.md)** — Structured ship-review note format for maintainer release triage. Generate one with `just release-summary` (or `just release-summary <version>`).
 - **Dependency auditing:** `cargo audit` runs on CI for every push
 - **WASM integrity:** Release artifacts include SHA-256 manifests
 - **Reproducible builds:** Local builds can be verified against CI-generated manifests
