@@ -14,6 +14,12 @@ mod tests;
 #[cfg(test)]
 mod fuzz_tests;
 
+/// Parity checker: compares current `compute_result` against the locked-in
+/// canonical golden vectors in `test_snapshots/tests/parity_baseline.json`.
+/// Run with `cargo test --lib parity_tests::` or `just parity-check`.
+#[cfg(test)]
+mod parity_tests;
+
 pub mod audit_state;
 pub mod config;
 pub mod config_bundle;

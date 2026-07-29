@@ -156,6 +156,45 @@ jobs:
         run: cargo test --lib fuzz_tests::
 
 
+  parity-check:
+    name: Parity Check (canonical baseline)
+    runs-on: ubuntu-latest
+    # This job is a release gate: it verifies that the current compute_result
+    # implementation produces identical outputs to the locked-in historical
+    # golden vectors in test_snapshots/tests/parity_baseline.json.
+    # A failure here means a calculation regression has been introduced and
+    # must be reviewed before merging or cutting a release.
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apexchainx_calculator/target
+          key: parity-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            parity-${{ runner.os }}-cargo-
+
+      - name: Run parity checker against canonical baseline
+        working-directory: apexchainx_calculator
+        run: cargo test --lib parity_tests::
+
+      - name: Upload parity baseline as artifact (for release traceability)
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-baseline
+          path: apexchainx_calculator/test_snapshots/tests/parity_baseline.json
+          retention-days: 90
+
+
   provenance-hashes:
     name: Provenance & Hashes
     runs-on: ubuntu-latest
