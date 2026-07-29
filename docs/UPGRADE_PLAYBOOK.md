@@ -109,15 +109,11 @@ get_pause_info()  # confirm reason and timestamp
 The backend should call `get_version_info()` against the **new** contract
 binary and confirm:
 
-```json
-{
-  "storage_version": <old_version>,
-  "result_schema_version": <unchanged_or_new>,
-  "needs_migration": true,
-  "is_paused": true,
-  "contract_name": "sla_calc"
-}
-```
+- `storage_version` is the **old** version (pre-migration, e.g., `1`)
+- `result_schema_version` is unchanged or matches the new schema version
+- `needs_migration` is `true`
+- `is_paused` is `true`
+- `contract_name` is `"sla_calc"`
 
 If `needs_migration` is `false`, the storage version is already current —
 skip to verification.
