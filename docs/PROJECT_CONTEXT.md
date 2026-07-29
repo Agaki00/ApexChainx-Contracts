@@ -9,6 +9,7 @@
 - [System Flow](#system-flow)
 - [Architectural Rules](#architectural-rules)
 - [SC-100: Future Contract Roadmap](#sc-100-future-contract-roadmap)
+- [Pruning benchmark note](PRUNING_BENCHMARK_NOTE.md)
 
 ---
 
