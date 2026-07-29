@@ -1,3 +1,8 @@
+//! Core SLA calculation logic and stats tracking.
+//!
+//! This module contains the delegated implementation of `calculate_sla`,
+//! `calculate_sla_view`, stats management, and telemetry recording.
+
 use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 use crate::{
@@ -98,6 +103,8 @@ pub fn calculate_sla(
     Ok(result)
 }
 
+/// Recalculates SLA deterministically without mutating state or emitting events.
+/// Can be called by anyone for audit and verification purposes.
 pub fn calculate_sla_view(
     env: &Env,
     outage_id: Symbol,
@@ -116,6 +123,7 @@ pub fn calculate_sla_view(
     )
 }
 
+/// Returns the cumulative SLA performance statistics.
 pub fn get_stats(env: &Env) -> Result<SLAStats, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     env.storage()
@@ -124,6 +132,7 @@ pub fn get_stats(env: &Env) -> Result<SLAStats, SLAError> {
         .ok_or(SLAError::NotInitialized)
 }
 
+/// Returns per-severity weekly violation-rate telemetry.
 pub fn get_severity_telemetry(env: &Env) -> Result<Vec<SeverityTelemetry>, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     let mut telemetry = Vec::new(env);
@@ -159,6 +168,8 @@ fn require_not_paused(env: &Env) -> Result<(), SLAError> {
     Ok(())
 }
 
+/// Computes the SLA result (met/violated, reward/penalty, rating) from inputs.
+/// Pure function — no state reads or writes.
 pub fn compute_result(
     outage_id: Symbol,
     mttr_minutes: u32,
@@ -241,6 +252,7 @@ fn set_count_lane(packed: u128, index: u32, value: u32) -> u128 {
     (packed & mask) | ((value as u128) << (index * 32))
 }
 
+/// Records per-severity calculation/violation counters for telemetry.
 pub fn record_severity_telemetry(env: &Env, severity: &Symbol, met: bool) {
     let index = crate::SLACalculatorContract::canonical_severity_index(severity).unwrap_or(0);
     let mut calculations = load_counts(env, &SEVERITY_CALC_COUNTS_KEY);
@@ -296,6 +308,7 @@ pub fn record_severity_telemetry(env: &Env, severity: &Symbol, met: bool) {
         .set(&LAST_VIOLATION_LEDGER_KEY, &last_violations);
 }
 
+/// Increments the cumulative SLA statistics, emitting `stats_sat` on overflow.
 pub fn increment_stats(env: &Env, met: bool, reward: i128, penalty: i128) {
     let mut stats: SLAStats = env.storage().instance().get(&STATS_KEY).unwrap_or(SLAStats {
         total_calculations: 0,

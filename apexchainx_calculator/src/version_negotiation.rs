@@ -93,7 +93,7 @@ pub const CONTRACT_SETTLEMENT: Symbol = symbol_short!("settle");
 
 /// Current protocol version for the multi-contract ecosystem.
 pub const PROTOCOL_VERSION: u32 = 1;
-/// Minimum protocol version we can interoperate with.
+/// Minimum protocol version this contract can interoperate with.
 pub const MIN_COMPATIBLE_PROTOCOL: u32 = 1;
 
 /// Builds the `VersionNegotiationInfo` for this contract (apexchainx_calculator).

@@ -1,3 +1,9 @@
+//! Configuration management for canonical and custom severity levels.
+//!
+//! This module handles reading, writing, and snapshotting of severity-level
+//! SLA configurations. It enforces validation, cross-severity ordering,
+//! and freeze-state gating for all config mutations.
+
 use soroban_sdk::{symbol_short, Env, Map, Symbol, Vec};
 
 use crate::{
@@ -7,6 +13,10 @@ use crate::{
     config_freeze, config_metadata,
 };
 
+/// Sets the SLA configuration for a given severity level.
+///
+/// Validates parameters, enforces cross-severity penalty ordering, records
+/// the config update timestamp, and emits a `cfg_upd` event.
 pub fn set_config(
     env: &Env,
     severity: Symbol,
@@ -44,11 +54,13 @@ pub fn set_config(
     Ok(())
 }
 
+/// Returns the SLA configuration for the given severity level.
 pub fn get_config(env: &Env, severity: Symbol) -> Result<SLAConfig, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::SLACalculatorContract::load_config(env, &severity)
 }
 
+/// Returns a deterministic backend-friendly snapshot of all canonical config values.
 pub fn get_config_snapshot(env: &Env) -> Result<SLAConfigSnapshot, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
 
@@ -65,6 +77,7 @@ pub fn get_config_snapshot(env: &Env) -> Result<SLAConfigSnapshot, SLAError> {
     })
 }
 
+/// Returns the full map of severity-to-config entries.
 pub fn list_configs(env: &Env) -> Result<Map<Symbol, SLAConfig>, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     env.storage()
@@ -73,16 +86,19 @@ pub fn list_configs(env: &Env) -> Result<Map<Symbol, SLAConfig>, SLAError> {
         .ok_or(SLAError::NotInitialized)
 }
 
+/// Returns a deterministic config version hash for backend cache invalidation.
 pub fn get_config_version_hash(env: &Env) -> Result<u64, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::SLACalculatorContract::compute_config_version_hash(env)
 }
 
+/// Returns metadata about the most recent configuration update, if any.
 pub fn get_last_config_update(env: &Env) -> Result<Option<crate::ConfigUpdateInfo>, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     Ok(config_metadata::get_last_config_update(env).map(|seq| crate::ConfigUpdateInfo { sequence: seq }))
 }
 
+/// Registers or updates a custom (non-canonical) severity level.
 pub fn set_custom_severity(
     env: &Env,
     severity: Symbol,
@@ -122,6 +138,7 @@ pub fn set_custom_severity(
     Ok(())
 }
 
+/// Removes a previously registered custom severity level.
 pub fn remove_custom_severity(env: &Env, severity: Symbol) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     require_not_frozen(env)?;
@@ -144,6 +161,7 @@ pub fn remove_custom_severity(env: &Env, severity: Symbol) -> Result<(), SLAErro
     Ok(())
 }
 
+/// Returns the SLAConfig for a registered custom severity.
 pub fn get_custom_severity(env: &Env, severity: Symbol) -> Result<SLAConfig, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     let custom: Map<Symbol, SLAConfig> = env
@@ -154,6 +172,7 @@ pub fn get_custom_severity(env: &Env, severity: Symbol) -> Result<SLAConfig, SLA
     custom.get(severity).ok_or(SLAError::SeverityNotInSet)
 }
 
+/// Returns a deterministic snapshot of all registered custom severity configurations.
 pub fn get_custom_config_snapshot(env: &Env) -> Result<SLAConfigSnapshot, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
 
