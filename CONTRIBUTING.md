@@ -617,4 +617,28 @@ just corrupted indexed data and broken settlement reconciliation.
 
 ---
 
+## SC-100: Release-Readiness Checklist for Contract Shape Changes
+
+If your PR touches **storage keys, the storage schema version, event topic
+constants, or event payload fields**, you must work through the dedicated
+checklist before requesting a review.
+
+**→ [`docs/CONTRACT_SHAPE_CHANGE_CHECKLIST.md`](docs/CONTRACT_SHAPE_CHANGE_CHECKLIST.md)**
+
+The checklist covers:
+
+| Section | What it checks |
+|---------|----------------|
+| **1. Storage schema** | New/renamed keys, `STORAGE_VERSION` bump, migration path, required tests |
+| **2. Event schema** | Topic constants, payload field order, version bump, symbol deprecation, required tests |
+| **3. Backend coordination** | Notifying `apexchainx-be`, filing deprecation follow-ups, updating `AUDIT_TRAIL.md` |
+| **4. Release artifacts** | `CHANGELOG.md` entry with explicit version numbers |
+| **5. CI gate** | `just ci` equivalent — all steps green before review |
+
+> **When in doubt, open the checklist.** Storage and event-shape changes are
+> invisible to the Rust compiler but can silently break backend indexers and
+> settlement reconciliation in production.
+
+---
+
 **Happy coding! 🚀**
