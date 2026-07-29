@@ -6,6 +6,7 @@ use crate::{PauseInfo, SLAConfigSnapshot, SLAResultSchema, SLAStats};
 ///
 /// Groups all contract state (roles, config, stats, history, schema) into a
 /// single read for backend consumers.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AuditState {

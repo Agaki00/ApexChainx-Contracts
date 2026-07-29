@@ -31,6 +31,7 @@ use soroban_sdk::{contracttype, symbol_short, Env, Symbol, Vec};
 
 /// Version information for a single contract, designed to be returned by
 /// a standard `get_version_info()` function on any contract in the ecosystem.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VersionNegotiationInfo {
@@ -49,6 +50,7 @@ pub struct VersionNegotiationInfo {
 }
 
 /// The outcome of a version negotiation between multiple contracts.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NegotiationOutcome {
@@ -61,6 +63,7 @@ pub enum NegotiationOutcome {
 }
 
 /// Describes which contract(s) caused an incompatibility.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VersionMismatchDetail {
@@ -73,6 +76,7 @@ pub struct VersionMismatchDetail {
 }
 
 /// Full result of a version negotiation across a set of contracts.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VersionNegotiationResult {

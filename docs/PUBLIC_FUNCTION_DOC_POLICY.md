@@ -152,24 +152,27 @@ contract-level signal that a return shape change affects the bridge.
 
 This policy is enforced at multiple levels:
 
-### 1. Compile-time (`#![deny(missing_docs)]`)
+### 1. Compile-time (`#![warn(missing_docs)]`)
 
 The crate root (`apexchainx_calculator/src/lib.rs`) carries
-`#![deny(missing_docs)]`. This causes `cargo check` / `cargo build` to
-fail if any `pub` item in the crate lacks a doc comment.
+`#![warn(missing_docs)]`. This causes `cargo check` / `cargo build` to
+emit warnings for any `pub` item in the crate that lacks a doc comment.
 
-```rust
-// In lib.rs:
-#![no_std]
-#![deny(missing_docs)]
-```
+> **Note:** Soroban SDK proc macros (`#[contracttype]`, `#[contract]`,
+> `#[contracterror]`) generate public associated functions and statics
+> that cannot carry doc comments. To keep the warning output actionable,
+> `#[allow(missing_docs)]` is applied to `#[contracttype]` structs and
+> `#[contracterror]` enums so only **human-written** public items trigger
+> warnings. A `warn`-level lint is used instead of `deny` to prevent
+> macro-generated items from blocking compilation.
 
 ### 2. CI (`cargo doc`)
 
 The `ci.yml` workflow runs `cargo doc --no-deps --document-private-items`
 and fails if `RUSTDOCFLAGS="-D warnings"` produces any warnings. This
 catches broken intra-doc links (`[`NotInitialized`]` referencing a
-nonexistent item).
+nonexistent item). It also runs `RUSTFLAGS="-D warnings" cargo check` to
+ensure `missing_docs` warnings fail CI.
 
 ### 3. Code review
 

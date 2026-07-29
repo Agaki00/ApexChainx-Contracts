@@ -14,6 +14,7 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Map, String, Symbol, Vec,
 };
 
+#[allow(missing_docs)]
 #[contract]
 pub struct SLACalculatorContract;
 
@@ -281,6 +282,7 @@ pub(crate) const EVENT_VERSION: Symbol = symbol_short!("v1");
 // -----------------------------------------------------------------------
 
 /// Contract has already been initialized — cannot initialize twice.
+#[allow(missing_docs)]
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
@@ -364,6 +366,7 @@ pub enum SLAError {
 
 /// Configuration parameters for a single severity level.
 /// Each severity (critical, high, medium, low) has its own SLAConfig.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SLAConfig {
@@ -377,6 +380,7 @@ pub struct SLAConfig {
 
 /// Complete result of an SLA calculation, returned by calculate_sla
 /// and calculate_sla_view.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SLAResult {
@@ -401,6 +405,7 @@ pub struct SLAResult {
 }
 
 /// A single severity-to-config mapping entry in a config snapshot.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SLAConfigEntry {
@@ -412,6 +417,7 @@ pub struct SLAConfigEntry {
 
 /// Ordered snapshot of all severity configurations, suitable for backend
 /// consumption. Entries are in canonical severity order.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SLAConfigSnapshot {
@@ -424,6 +430,7 @@ pub struct SLAConfigSnapshot {
 /// Describes the result encoding schema for backend consumers.
 /// Backends use this to interpret SLA result symbols without
 /// hard-coding symbol values.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SLAResultSchema {
@@ -455,6 +462,7 @@ pub struct SLAResultSchema {
 }
 
 /// A deprecated symbol mapping that is still emitted for backward compatibility.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeprecatedSymbol {
@@ -469,6 +477,7 @@ pub struct DeprecatedSymbol {
 }
 
 /// #60 – Single introspection call for backend clients.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContractMetadata {
@@ -480,6 +489,7 @@ pub struct ContractMetadata {
 }
 
 /// #29 – Cumulative on-chain SLA performance metrics.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SLAStats {
@@ -499,6 +509,7 @@ pub struct SLAStats {
 /// The total penalty for one event grows linearly: `overtime_minutes *
 /// penalty_per_minute`. There is no contract-level cap on overtime, so the
 /// dashboard must apply its own horizon when projecting worst-case exposure.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SeverityExposure {
@@ -526,6 +537,7 @@ pub struct SeverityExposure {
 ///
 /// `breakdown` contains one entry per canonical severity in canonical order
 /// (critical → high → medium → low).
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EconomicExposure {
@@ -538,6 +550,7 @@ pub struct EconomicExposure {
 }
 
 /// #101 – Per-severity weekly violation-rate telemetry snapshot.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SeverityTelemetry {
@@ -548,6 +561,7 @@ pub struct SeverityTelemetry {
 }
 
 /// #66 – Pause metadata stored when the contract is paused.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PauseInfo {

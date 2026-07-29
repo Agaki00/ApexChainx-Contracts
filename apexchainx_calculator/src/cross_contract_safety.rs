@@ -71,6 +71,7 @@ pub struct SafeCallResult {
 /// we store a `compensation_tag` (a Symbol identifying the compensation
 /// logic) and the `args` that were originally passed so the caller can
 /// re-invoke with reversed semantics.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct CompensationAction {
