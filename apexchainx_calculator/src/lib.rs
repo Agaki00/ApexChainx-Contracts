@@ -1,5 +1,13 @@
+//! ApexChainx SLA Calculator — Soroban smart contract for deterministic
+//! SLA calculation, secure payment escrow, and multi-party settlement on the
+//! Stellar network.
+//!
+//! This crate implements the core SLA calculator contract with configurable
+//! severity levels, role-based access control, pause/unpause lifecycle,
+//! cumulative statistics, event emission for backend indexing, and storage
+//! version migration.
 #![no_std]
-#![deny(missing_docs)]
+#![warn(missing_docs)]
 extern crate alloc;
 
 use soroban_sdk::{
@@ -898,7 +906,8 @@ impl SLACalculatorContract {
     // Role queries
     // -------------------------------------------------------------------
 
-    pub fn get_admin(env: Env) -> Result<Address, SLAError> {
+    /// Returns the current admin address.
+pub fn get_admin(env: Env) -> Result<Address, SLAError> {
         Self::check_version(&env)?;
         env.storage()
             .instance()
@@ -1141,7 +1150,8 @@ impl SLACalculatorContract {
     // Config management (admin only)                                 #28
     // -------------------------------------------------------------------
 
-    pub fn set_config(
+    /// Updates the configuration for a canonical severity level. Admin only.
+pub fn set_config(
         env: Env,
         caller: Address,
         severity: Symbol,
@@ -1193,7 +1203,8 @@ impl SLACalculatorContract {
         Ok(())
     }
 
-    pub fn get_config(env: Env, severity: Symbol) -> Result<SLAConfig, SLAError> {
+    /// Returns the configuration for the given severity.
+pub fn get_config(env: Env, severity: Symbol) -> Result<SLAConfig, SLAError> {
         Self::check_version(&env)?;
         Self::load_config(&env, &severity)
     }
@@ -1311,7 +1322,8 @@ impl SLACalculatorContract {
         })
     }
 
-    pub fn list_configs(env: Env) -> Result<Map<Symbol, SLAConfig>, SLAError> {
+    /// Lists all configured severity-to-config mappings.
+pub fn list_configs(env: Env) -> Result<Map<Symbol, SLAConfig>, SLAError> {
         Self::check_version(&env)?;
         env.storage()
             .instance()
@@ -1419,7 +1431,8 @@ impl SLACalculatorContract {
         })
     }
 
-    pub fn get_result_schema(env: Env) -> Result<SLAResultSchema, SLAError> {
+    /// Returns the result schema descriptor for backend symbol mapping.
+pub fn get_result_schema(env: Env) -> Result<SLAResultSchema, SLAError> {
         Self::check_version(&env)?;
         Ok(SLAResultSchema {
             version: symbol_short!("v1"),
@@ -1456,7 +1469,8 @@ impl SLACalculatorContract {
         Ok(Some(ConfigBundle { snapshot, schema }))
     }
 
-    pub fn get_full_audit_state(env: Env) -> Result<AuditState, SLAError> {
+    /// Returns the full audit state including roles, config, stats, and history.
+pub fn get_full_audit_state(env: Env) -> Result<AuditState, SLAError> {
         Self::check_version(&env)?;
 
         let admin = Self::get_admin(env.clone())?;
