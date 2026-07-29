@@ -29,7 +29,8 @@ mod fuzz_tests;
 /// Run with `cargo test --lib parity_tests::` or `just parity-check`.
 #[cfg(test)]
 mod parity_tests;
-
+#[cfg(test)]
+mod prune_benchmark;
 pub mod audit_state;
 pub mod calculation;
 pub mod api_stability;pub mod config;
