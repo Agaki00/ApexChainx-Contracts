@@ -83,6 +83,10 @@ reference them until they appear in the repository.
 - Each new crate must expose a `get_result_schema()` equivalent for safe version pinning
 - Frontend never calls contracts directly — all invocations go through the backend
 
+### API Stability
+
+All public contract entrypoints are classified by compatibility risk in the **[API Stability Scorecard](API_STABILITY_SCORECARD.md)**. Contributors must consult this scorecard before modifying any public function signature to determine whether the change is additive or breaking.
+
 ### Contribution Guidelines for New Crates
 
 1. **Open a tracking issue** before creating the crate directory
