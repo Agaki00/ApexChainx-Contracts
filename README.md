@@ -66,6 +66,15 @@ This repository is the execution-layer side of the 3-repo architecture.
 | [apexchainx-fe](https://github.com/ApexChainx/apexchainx-fe) | Frontend application (React/TypeScript) |
 | [apexchainx-be](https://github.com/ApexChainx/apexchainx-be) | Backend API and contract bridge |
 
+## Documentation
+
+- **[Configuration Validation Rules](docs/config-validation.md)** — Parameter bounds, severity-specific rules, and cross-severity consistency.
+- **[Severity Compatibility Matrix](docs/severity-compatibility-matrix.md)** — Canonical vs. custom severity families, additive vs. breaking changes, release planning checklist.
+- **[Event Ordering Guarantees](docs/event-ordering-guarantees.md)** — Deterministic event sequencing contract for backend consumers.
+- **[Retention Benchmark Guidance](docs/retention-benchmark-guidance.md)** — `MAX_HISTORY_SIZE` tuning, retention trade-offs, and deployment-scale recommendations.
+- **[Audit Trail](docs/AUDIT_TRAIL.md)** — On-chain event audit trail structure and consumer guidance.
+- **[Project Context](docs/PROJECT_CONTEXT.md)** — System architecture, repository landscape, and future roadmap.
+
 ## Security & Supply Chain
 
 - **[Release Artifact Provenance Policy](docs/RELEASE_PROVENANCE_POLICY.md)** — Guidelines for WASM output checksums and snapshot check-ins.
