@@ -191,3 +191,8 @@ description of every `just` recipe.
 ### Test Vector Artifacts for Backend Parity
 For a full map of this repo's snapshot/fixture directories, their lifecycle, and
 update workflow, see [docs/test-fixtures-guide.md](docs/test-fixtures-guide.md).
+## Contribution Resources
+
+- **[Contributing Guide](CONTRIBUTING.md)** — Development workflow, code style, PR checklist
+- **[Module Ownership Map](docs/MODULE_OWNERSHIP.md)** — Who reviews what: module-to-owner mapping for the contract crate, docs, CI, and tooling
+- **[API Stability Scorecard](docs/API_STABILITY_SCORECARD.md)** — Compatibility risk classification for all public entrypoints

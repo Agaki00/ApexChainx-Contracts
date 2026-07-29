@@ -357,7 +357,9 @@ impl SLAContract {
 ### API Stability Consideration
 
 Before modifying any public contract entrypoint, consult the **[API Stability Scorecard](docs/API_STABILITY_SCORECARD.md)** to determine whether your change is additive (safe) or breaking (requires a version bump and/or migration). The scorecard classifies every public function by stability tier (🔒 Frozen, ⚠️ Stable, 🔄 Evolving, 🛡️ Admin-Gated) and provides a change impact guide.
+### Review Routing
 
+Before opening a PR, consult the **[Module Ownership Map](docs/MODULE_OWNERSHIP.md)** to identify which review groups should be requested. High-risk modules (calculation, governance, storage version, event schema, config, cross-contract safety) have additional review requirements documented in the map.
 ### Before Submitting Checklist
 
 #### Required Checks
