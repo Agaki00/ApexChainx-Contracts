@@ -97,7 +97,24 @@ or have broad blast radius (`prune_history`).
 > `list_`, `healthcheck`, `calculate_sla_view`, or `replay_calculate_sla` are
 > read-only and safe to call freely. `calculate_sla` requires the operator
 > role. Everything else requires the admin role.
+## Telemetry & Weekly Reset Semantics
 
+The `apexchainx_calculator` contract maintains per-severity telemetry (`SeverityTelemetry`) tracking calculation counts, violation counts, and violation rates.
+
+### Operator Posture & Reset Behavior
+
+1. **Lazy On-Execution Evaluation**:
+   - The contract checks the timestamp of the last calculation/violation for the invoked severity lane when `calculate_sla` is called.
+   - If $\ge 7$ days ($604,800$ seconds) have passed since the recorded timestamp for that severity lane, the calculation and violation counters for that specific lane are reset to `0` before processing the current calculation.
+
+2. **Per-Severity Isolation**:
+   - Resets are evaluated per severity lane (`critical`, `high`, `medium`, `low`).
+   - Activity in one lane does not reset or refresh timestamps for other lanes.
+
+3. **Impact on Backend Consumers and Monitoring Dashboards**:
+   - `get_severity_telemetry()` reflects stored counters. Inactive lanes retain their last updated telemetry state until the next invocation in that lane triggers a lazy reset.
+   - Replays and duplicate resubmissions with identical inputs/configs do NOT update or reset telemetry counters.
+   - Off-chain monitoring systems or backend consumers desiring continuous 7-day rolling window analytics should aggregate on-chain `EVENT_SLA_CALC` events or poll `get_severity_telemetry()` periodically alongside contract calls.
 ---
 
 ## SC-100: Future Contract Roadmap
