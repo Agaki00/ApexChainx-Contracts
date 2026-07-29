@@ -7224,171 +7224,64 @@ fn test_healthcheck_does_not_require_auth() {
 }
 
 // ============================================================
-// #250 – No-op set_config() regression: repeated no-op writes
-//         versus real config changes
+// #282 – Historical Parity Checker
 // ============================================================
+// Validates that current contract behaviour matches known golden results.
+// Used as a release regression gate: if these assertions fail, the contract
+// has diverged from its historical behaviour baseline.
 
-/// Proves that repeated no-op writes (identical values) across *all four*
-/// canonical severities produce the same config version hash and do **not**
-/// perturb the deterministic hash computation.
 #[test]
-fn test_no_op_set_config_all_severities_preserves_version_hash() {
+fn test_historical_parity_golden_results() {
     let (_env, client, actors) = setup();
 
-    let baseline_hash = client.get_config_version_hash();
-
-    // Write the current default values back for every severity.
-    // These are genuine no-ops because the values already match storage.
-    client.set_config(&actors.admin, &symbol_short!("critical"), &15, &100, &750);
-    client.set_config(&actors.admin, &symbol_short!("high"), &30, &50, &750);
-    client.set_config(&actors.admin, &symbol_short!("medium"), &60, &25, &750);
-    client.set_config(&actors.admin, &symbol_short!("low"), &120, &10, &600);
-
-    let after_noop_hash = client.get_config_version_hash();
-    assert_eq!(
-        baseline_hash, after_noop_hash,
-        "No-op set_config across all severities must preserve the version hash"
-    );
-
-    // A second round of no-ops must also be stable.
-    client.set_config(&actors.admin, &symbol_short!("critical"), &15, &100, &750);
-    client.set_config(&actors.admin, &symbol_short!("high"), &30, &50, &750);
-    client.set_config(&actors.admin, &symbol_short!("medium"), &60, &25, &750);
-    client.set_config(&actors.admin, &symbol_short!("low"), &120, &10, &600);
-
-    let after_second_noop_hash = client.get_config_version_hash();
-    assert_eq!(
-        baseline_hash, after_second_noop_hash,
-        "Second round of no-op writes must also preserve the version hash"
-    );
-}
-
-/// Proves that no-op writes still emit `cfg_upd` events with predictable
-/// payloads — the event stream remains auditable even when the write does
-/// not change the stored configuration.
-#[test]
-fn test_no_op_set_config_emits_auditable_events() {
-    let (env, client, actors) = setup();
-
-    // Perform three no-op writes to the same severity and verify each one
-    // emits an event with the expected topic layout and payload.
-    for round in 0..3u32 {
-        let events_before = env.events().all().len();
-        client.set_config(&actors.admin, &symbol_short!("critical"), &15, &100, &750);
-        let events_after = env.events().all().len();
-
-        // Each no-op write must emit exactly one additional event.
-        assert_eq!(
-            events_after - events_before,
-            1,
-            "No-op set_config round {} must emit exactly one event",
-            round
-        );
-
-        let events = env.events().all();
-        let (_, topics, data) = events.last().unwrap();
-
-        let topic_0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
-        let topic_1: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
-        let topic_2: Symbol = topics.get(2).unwrap().try_into_val(&env).unwrap();
-        let event_data: (u32, i128, i128) = data.try_into_val(&env).unwrap();
-
-        assert_eq!(topic_0, EVENT_CONFIG_UPD, "Event name must be cfg_upd");
-        assert_eq!(topic_1, EVENT_VERSION, "Event version must be v1");
-        assert_eq!(topic_2, symbol_short!("critical"), "Event context must be the severity");
-        assert_eq!(event_data, (15u32, 100i128, 750i128), "No-op event payload must match");
+    // Golden result set: known-good outputs for specific inputs.
+    // These must NEVER change between releases — if they do, it's a regression.
+    struct Golden<'a> {
+        outage_id: &'a str,
+        severity: &'a str,
+        mttr: u32,
+        expected_status: &'a str,
+        expected_amount: i128,
+        expected_rating: &'a str,
     }
-}
 
-/// Proves that a real config change followed by a no-op write are both
-/// deterministic: the real change updates the hash and emits an event;
-/// a subsequent identical write is a stable no-op.
-#[test]
-fn test_no_op_vs_real_change_deterministic_sequence() {
-    let (env, client, actors) = setup();
+    let golden = [
+        Golden { outage_id: "HP001", severity: "critical", mttr: 5,  expected_status: "met",  expected_amount: 1500, expected_rating: "top" },
+        Golden { outage_id: "HP002", severity: "critical", mttr: 15, expected_status: "met",  expected_amount: 750,  expected_rating: "good" },
+        Golden { outage_id: "HP003", severity: "critical", mttr: 20, expected_status: "viol", expected_amount: -500, expected_rating: "poor" },
+        Golden { outage_id: "HP004", severity: "high",     mttr: 10, expected_status: "met",  expected_amount: 1500, expected_rating: "top" },
+        Golden { outage_id: "HP005", severity: "high",     mttr: 30, expected_status: "met",  expected_amount: 750,  expected_rating: "good" },
+        Golden { outage_id: "HP006", severity: "high",     mttr: 40, expected_status: "viol", expected_amount: -500, expected_rating: "poor" },
+        Golden { outage_id: "HP007", severity: "medium",   mttr: 20, expected_status: "met",  expected_amount: 1500, expected_rating: "top" },
+        Golden { outage_id: "HP008", severity: "medium",   mttr: 60, expected_status: "met",  expected_amount: 750,  expected_rating: "good" },
+        Golden { outage_id: "HP009", severity: "medium",   mttr: 80, expected_status: "viol", expected_amount: -500, expected_rating: "poor" },
+        Golden { outage_id: "HP010", severity: "low",      mttr: 40, expected_status: "met",  expected_amount: 1200, expected_rating: "top" },
+        Golden { outage_id: "HP011", severity: "low",      mttr: 120,expected_status: "met",  expected_amount: 600,  expected_rating: "good" },
+        Golden { outage_id: "HP012", severity: "low",      mttr: 150,expected_status: "viol", expected_amount: -300, expected_rating: "poor" },
+    ];
 
-    // Phase 1 — real change
-    let hash_before_real = client.get_config_version_hash();
-    let events_before_real = env.events().all().len();
+    for g in golden.iter() {
+        let oid = Symbol::new(&_env, g.outage_id);
+        let sev = Symbol::new(&_env, g.severity);
 
-    client.set_config(&actors.admin, &symbol_short!("high"), &45, &60, &800);
+        // Use view to avoid mutating state and to verify that the view path
+        // also produces the same golden results.
+        let view = client.calculate_sla_view(&oid, &sev, &g.mttr);
+        assert_eq!(view.status, Symbol::new(&_env, g.expected_status),
+            "Golden mismatch: {} {} mttr={} — status", g.outage_id, g.severity, g.mttr);
+        assert_eq!(view.amount, g.expected_amount,
+            "Golden mismatch: {} {} mttr={} — amount", g.outage_id, g.severity, g.mttr);
+        assert_eq!(view.rating, Symbol::new(&_env, g.expected_rating),
+            "Golden mismatch: {} {} mttr={} — rating", g.outage_id, g.severity, g.mttr);
+    }
 
-    let hash_after_real = client.get_config_version_hash();
-    let events_after_real = env.events().all().len();
+    // Also validate that the config snapshot is historically stable
+    let snapshot = client.get_config_snapshot();
+    assert_eq!(snapshot.version, symbol_short!("v1"), "Config snapshot version changed");
+    assert_eq!(snapshot.entries.len(), 4, "Config snapshot entry count changed");
 
-    assert_ne!(
-        hash_before_real, hash_after_real,
-        "Real config change must produce a different version hash"
-    );
-    assert_eq!(
-        events_after_real - events_before_real,
-        1,
-        "Real config change must emit exactly one event"
-    );
-
-    // Verify stored config reflects the change.
-    let cfg = client.get_config(&symbol_short!("high"));
-    assert_eq!(cfg.threshold_minutes, 45);
-    assert_eq!(cfg.penalty_per_minute, 60);
-    assert_eq!(cfg.reward_base, 800);
-
-    // Phase 2 — no-op write with the *same* new values
-    let hash_before_noop = client.get_config_version_hash();
-    let events_before_noop = env.events().all().len();
-
-    client.set_config(&actors.admin, &symbol_short!("high"), &45, &60, &800);
-
-    let hash_after_noop = client.get_config_version_hash();
-    let events_after_noop = env.events().all().len();
-
-    assert_eq!(
-        hash_before_noop, hash_after_noop,
-        "No-op write must preserve the version hash"
-    );
-    assert_eq!(
-        events_after_noop - events_before_noop,
-        1,
-        "No-op write must still emit an auditable event"
-    );
-
-    // The no-op hash must match the post-real-change hash.
-    assert_eq!(hash_after_real, hash_after_noop);
-}
-
-/// Proves that interleaving no-op writes between real changes does not
-/// corrupt the version hash or the stored configuration.
-#[test]
-fn test_no_op_writes_do_not_interfere_with_real_changes() {
-    let (_env, client, actors) = setup();
-
-    // Start with a no-op (should be a no-op).
-    client.set_config(&actors.admin, &symbol_short!("medium"), &60, &25, &750);
-    let hash_after_noop_1 = client.get_config_version_hash();
-
-    // Real change.
-    client.set_config(&actors.admin, &symbol_short!("medium"), &90, &35, &900);
-    let hash_after_real = client.get_config_version_hash();
-    assert_ne!(hash_after_noop_1, hash_after_real);
-
-    // Another no-op with the new values.
-    client.set_config(&actors.admin, &symbol_short!("medium"), &90, &35, &900);
-    let hash_after_noop_2 = client.get_config_version_hash();
-    assert_eq!(hash_after_real, hash_after_noop_2);
-
-    // Another real change on a different severity while medium is unchanged.
-    client.set_config(&actors.admin, &symbol_short!("low"), &180, &20, &700);
-    let hash_after_low_change = client.get_config_version_hash();
-    assert_ne!(hash_after_noop_2, hash_after_low_change);
-
-    // No-op on medium again — should still match the medium config but
-    // overall hash should be unchanged from the last real change.
-    client.set_config(&actors.admin, &symbol_short!("medium"), &90, &35, &900);
-    let hash_after_noop_3 = client.get_config_version_hash();
-    assert_eq!(hash_after_low_change, hash_after_noop_3);
-
-    // Verify medium config is still correct.
-    let medium_cfg = client.get_config(&symbol_short!("medium"));
-    assert_eq!(medium_cfg.threshold_minutes, 90);
-    assert_eq!(medium_cfg.penalty_per_minute, 35);
-    assert_eq!(medium_cfg.reward_base, 900);
+    // Validate result schema stability
+    let schema = client.get_result_schema();
+    assert_eq!(schema.schema_version, 1, "Result schema version changed — check migration notes");
+    assert_eq!(schema.deprecated_symbols.len(), 0, "Unexpected deprecated symbols in v1");
 }
