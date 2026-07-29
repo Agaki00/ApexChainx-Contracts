@@ -83,6 +83,10 @@ reference them until they appear in the repository.
 - Each new crate must expose a `get_result_schema()` equivalent for safe version pinning
 - Frontend never calls contracts directly — all invocations go through the backend
 
+### Upgrade & Migration
+
+Storage-version upgrades follow the [Upgrade Playbook](UPGRADE_PLAYBOOK.md), which documents the complete preflight → migration → verification → rollback workflow for operators.
+
 ### Contribution Guidelines for New Crates
 
 1. **Open a tracking issue** before creating the crate directory
@@ -90,3 +94,4 @@ reference them until they appear in the repository.
 3. **Add to CI matrix** in `.github/workflows/`
 4. **Export a result schema** function so the backend can detect breaking changes
 5. **Include version negotiation** support for multi-contract compatibility
+6. **Update the upgrade playbook** if the new crate introduces its own storage-version migration path

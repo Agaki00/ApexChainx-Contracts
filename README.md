@@ -37,7 +37,9 @@ frontend never interacts with contracts directly.
 ### How are contract upgrades handled?
 
 The contract includes a version negotiation protocol (`get_version_info()`) that
-allows backends to verify compatibility before deployment.
+allows backends to verify compatibility before deployment. Full upgrade procedures
+— including preflight checks, migration execution, post-upgrade verification, and
+rollback — are documented in the **[Upgrade Playbook](docs/UPGRADE_PLAYBOOK.md)**.
 
 ### What stops an operator from spamming the same outage ID?
 
