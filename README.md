@@ -91,6 +91,13 @@ just ci
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup instructions.
 
+## Versioning & Compatibility
+
+- **[Compatibility Tracking Matrix](docs/COMPATIBILITY_TRACKING_MATRIX.md)** — Tracking matrix for event-schema drift, storage-version drift, and deployment compatibility across releases.
+- **[Reserved Keys & Event Topics Policy](docs/RESERVED_KEYS_POLICY.md)** — Reserved key prefix conventions and event-topic namespace rules.
+- **[Event Topic Compatibility](docs/EVENT_TOPIC_COMPATIBILITY.md)** — Event topic compatibility and versioning policies.
+- **[Contract API Compatibility](docs/CONTRACT_API_COMPATIBILITY.md)** — API compatibility assertions for backend integration.
+
 ## Security & Supply Chain
 
 - **[Release Artifact Provenance Policy](docs/RELEASE_PROVENANCE_POLICY.md)** — Guidelines for WASM output checksums and snapshot check-ins.
