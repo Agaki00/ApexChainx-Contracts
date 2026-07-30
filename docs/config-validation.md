@@ -323,3 +323,5 @@ canonical configuration.
 | `get_custom_severity` | `(env, severity)` | Read a registered custom severity |
 | `remove_custom_severity` | `(env, caller, severity)` | Unregister a custom severity |
 | `get_custom_config_snapshot` | `(env)` | List all registered custom severities |
+| Zero-threshold safety | `threshold_minutes = 0` is rejected with `InvalidThreshold` (code 8) before reaching storage. This prevents a division in `compute_result`'s performance-ratio calculation from ever operating on a zero denominator |
+| Cross-severity hardening | `validate_cross_severity_penalty_ordering` uses safe `.ok_or(InvalidSeverity)` lookups on the canonical severity list rather than panicking `.unwrap()` calls, so any unexpected invariant violation surfaces as a deterministic error instead of an unrecoverable host trap |

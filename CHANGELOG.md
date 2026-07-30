@@ -10,7 +10,17 @@
 
 ### Changed
 - `test_storage_key_namespace_symbols_are_distinct` now covers all 17 on-chain storage key constants (previously omitted `SEVERITY_CALC_COUNTS_KEY`, `SEVERITY_VIOL_COUNTS_KEY`, `LAST_CALCULATION_LEDGER_KEY`, `LAST_VIOLATION_LEDGER_KEY`, and `LAST_CFG_UPDATE_KEY`). The assertion now includes the colliding indices in its error message for faster diagnosis. A maintenance comment listing every key and a pointer to this test was added to both the storage-key block in `lib.rs` and the test itself so future contributors know to update both locations when adding a new key.
-
+### Fixed
+- Replaced stale `test_zero_threshold_always_violated` test in `threshold_config.rs`
+  with two correct tests that verify `set_config` rejects `threshold_minutes = 0`
+  with `InvalidThreshold` (code 8). The previous test incorrectly assumed a
+  zero-threshold write would succeed and then tested calculation behaviour on an
+  impossible stored state.
+- Hardened `validate_cross_severity_penalty_ordering` in `lib.rs` to use
+  `.ok_or(SLAError::InvalidSeverity)?` instead of `.unwrap()` when indexing
+  into the canonical severity list. The function is now panic-free: if the
+  internal severity list invariant is ever broken the call surfaces a
+  deterministic `InvalidSeverity` error rather than an unrecoverable host trap.
 ### Added
 - `docs/CONTRACT_SHAPE_CHANGE_CHECKLIST.md` — release-readiness checklist for PRs that touch storage keys, `STORAGE_VERSION`, event topic constants, or event payload fields; cross-referenced from `CONTRIBUTING.md` as SC-100
 - **[SC-509] SLAError Addition Workflow** (#253) — comprehensive contributor guide for adding, deprecating, or reviewing `SLAError` variants without breaking backend adapter logic. See `docs/sla-error-additions-guide.md`.
