@@ -31,7 +31,7 @@ mod fuzz_tests;
 mod parity_tests;
 #[cfg(test)]
 mod storage_footprint_tests;
-pub mod audit_state;
+mod prune_benchmark;pub mod audit_state;
 pub mod calculation;
 pub mod api_stability;pub mod config;
 pub mod config_bundle;
