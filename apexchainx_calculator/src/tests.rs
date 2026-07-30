@@ -6615,6 +6615,14 @@ fn test_257_result_schema_fields_are_stable() {
 }
 
 #[test]
+fn test_239_severity_aliases_field_exists_and_empty_in_v1() {
+    let (_env, client, _actors) = setup();
+    let schema = client.get_result_schema();
+    // #239 – severity_aliases field must be present for future deprecations
+    assert_eq!(schema.severity_aliases.len(), 0, "No severity aliases deprecated in v1");
+}
+
+#[test]
 fn test_257_hash_differs_across_all_four_severities() {
     // Updating each severity independently must produce a distinct hash.
     let (_env, client, actors) = setup();

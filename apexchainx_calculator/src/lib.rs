@@ -541,6 +541,9 @@ pub struct SLAResultSchema {
     /// Deprecated symbols that are still emitted for backward compatibility.
     /// Each entry is (deprecated_symbol, replacement_symbol, deprecated_at_schema_version).
     pub deprecated_symbols: Vec<DeprecatedSymbol>,
+    /// #239 – Deprecated severity alias mappings for historical result interpretation.
+    /// Backends use this to translate old severity symbols to current ones.
+    pub severity_aliases: Vec<SeverityAliasMapping>,
 }
 
 /// A deprecated symbol mapping that is still emitted for backward compatibility.
@@ -555,6 +558,25 @@ pub struct DeprecatedSymbol {
     /// The schema version at which this deprecation was introduced.
     pub deprecated_at: u32,
     /// The schema version at which the old symbol will be removed (None = not yet determined).
+    pub removal_version: Option<u32>,
+}
+
+/// #239 – A deprecated severity alias mapping for historical result interpretation.
+///
+/// When a severity alias is renamed (e.g., "critical" → "crit"), historical SLAResult
+/// entries retain the old severity symbol. This struct allows backends to translate
+/// old severity symbols to current ones when querying historical data.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SeverityAliasMapping {
+    /// The deprecated severity symbol still present in historical results.
+    pub old_severity: Symbol,
+    /// The replacement severity symbol that supersedes it.
+    pub new_severity: Symbol,
+    /// The schema version at which this deprecation was introduced.
+    pub deprecated_at: u32,
+    /// The schema version at which the old severity was removed from active config.
+    /// None indicates the severity is still valid (coexistence phase).
     pub removal_version: Option<u32>,
 }
 
@@ -1644,6 +1666,7 @@ pub fn get_result_schema(env: Env) -> Result<SLAResultSchema, SLAError> {
             rating_poor: symbol_short!("poor"),
             includes_config_version_hash: true,
             deprecated_symbols: Vec::new(&env),
+            severity_aliases: Vec::new(&env),
         })
     }
 
