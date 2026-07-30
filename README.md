@@ -91,6 +91,11 @@ just ci
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup instructions.
 
+## Operations & Reliability
+
+- **[Migration State Consumption Guide](docs/MIGRATION_STATE_CONSUMPTION.md)** — How `get_migration_state()` should be consumed by backend services and operator tooling for safe contract upgrades, monitoring, and deployment pipelines.
+- **[SLAError Failure Taxonomy](docs/FAILURE_TAXONOMY.md)** — Formal failure taxonomy for every `SLAError` code, including categories, severity, consumer impact, and recovery strategies.
+
 ## Security & Supply Chain
 
 - **[Release Artifact Provenance Policy](docs/RELEASE_PROVENANCE_POLICY.md)** — Guidelines for WASM output checksums and snapshot check-ins.
