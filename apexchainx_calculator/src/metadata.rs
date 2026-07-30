@@ -6,8 +6,8 @@
 use soroban_sdk::{Address, Env, String};
 
 use crate::{
-    SLAError, PauseInfo,
-    PAUSED_KEY, PAUSE_INFO_KEY, MAX_REASON_LEN, EVENT_VERSION, EVENT_PAUSED, EVENT_UNPAUSED,
+    PauseInfo, SLAError, EVENT_PAUSED, EVENT_UNPAUSED, EVENT_VERSION, MAX_REASON_LEN, PAUSED_KEY,
+    PAUSE_INFO_KEY,
 };
 
 /// Pauses the contract, blocking state-changing operations. Admin only.

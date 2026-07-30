@@ -31,13 +31,13 @@ mod fuzz_tests;
 mod parity_tests;
 
 pub mod audit_state;
+pub mod calculation;
 pub mod config;
 pub mod config_bundle;
 pub mod config_freeze;
 pub mod config_metadata;
 pub mod coordination_harness;
 pub mod cross_contract_safety;
-pub mod calculation;
 pub mod error_responses;
 pub mod event_correlation;
 mod event_schema;
@@ -1392,11 +1392,7 @@ pub fn set_config(
 
         // #92 – Cross-severity penalty ordering: enforce severity progression
         // so higher-severity penalties are never lower than lower-severity ones.
-        Self::validate_cross_severity_penalty_ordering(
-            &env,
-            &severity,
-            penalty_per_minute,
-        )?;
+        Self::validate_cross_severity_penalty_ordering(&env, &severity, penalty_per_minute)?;
 
         let mut configs: Map<Symbol, SLAConfig> = env
             .storage()
@@ -2387,8 +2383,7 @@ pub fn get_full_audit_state(env: Env) -> Result<AuditState, SLAError> {
             .get(&CONFIG_KEY)
             .ok_or(SLAError::NotInitialized)?;
 
-        let index = Self::canonical_severity_index(updated_severity)
-            .ok_or(SLAError::InvalidSeverity)?;
+        let index = Self::canonical_severity_index(updated_severity).ok_or(SLAError::InvalidSeverity)?;
         let severities = Self::canonical_severities(env);
 
         // Check against the next-lower severity (if any):
@@ -2422,7 +2417,8 @@ pub fn get_full_audit_state(env: Env) -> Result<AuditState, SLAError> {
             let higher_sev = severities
                 .get(index - 1)
                 .ok_or(SLAError::InvalidSeverity)?;
-            if let Some(higher_cfg) = configs.get(higher_sev.clone()) {
+        if (1..=2).contains(&index) {
+            let higher_sev = severities.get(index - 1).unwrap();            if let Some(higher_cfg) = configs.get(higher_sev.clone()) {
                 if new_penalty > higher_cfg.penalty_per_minute {
                     return Err(SLAError::InvalidPenalty);
                 }
