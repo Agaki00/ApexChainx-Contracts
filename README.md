@@ -191,3 +191,13 @@ description of every `just` recipe.
 ### Test Vector Artifacts for Backend Parity
 For a full map of this repo's snapshot/fixture directories, their lifecycle, and
 update workflow, see [docs/test-fixtures-guide.md](docs/test-fixtures-guide.md).
+## Contract Lifecycle
+
+The contract's state machine has four orthogonal axes — initialized,
+version-matched, paused, and config-frozen — that stack to determine which
+operations are permitted.
+
+→ **[docs/CONTRACT_LIFECYCLE.md](docs/CONTRACT_LIFECYCLE.md)** — Mermaid
+state-transition diagrams for init, pause, migrate, config-freeze, admin
+transfer, and operator handoff flows, plus the combined state matrix and
+invariants table.

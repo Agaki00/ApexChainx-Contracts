@@ -9,7 +9,7 @@
 - [System Flow](#system-flow)
 - [Architectural Rules](#architectural-rules)
 - [Contract API Archetypes](#contract-api-archetypes)
-- [SC-100: Future Contract Roadmap](#sc-100-future-contract-roadmap)
+- [Contract Lifecycle](#contract-lifecycle)- [SC-100: Future Contract Roadmap](#sc-100-future-contract-roadmap)
 - [Pruning benchmark note](PRUNING_BENCHMARK_NOTE.md)
 
 ---
@@ -115,6 +115,26 @@ The `apexchainx_calculator` contract maintains per-severity telemetry (`Severity
    - `get_severity_telemetry()` reflects stored counters. Inactive lanes retain their last updated telemetry state until the next invocation in that lane triggers a lazy reset.
    - Replays and duplicate resubmissions with identical inputs/configs do NOT update or reset telemetry counters.
    - Off-chain monitoring systems or backend consumers desiring continuous 7-day rolling window analytics should aggregate on-chain `EVENT_SLA_CALC` events or poll `get_severity_telemetry()` periodically alongside contract calls.
+## Contract Lifecycle
+
+The `apexchainx_calculator` contract has four independent state axes
+(initialized, version-matched, paused, config-frozen) that combine to determine
+which operations are permitted at any moment.
+
+**→ See the full state-transition diagram: [docs/CONTRACT_LIFECYCLE.md](CONTRACT_LIFECYCLE.md)**
+
+Quick overview of the main lifecycle states:
+
+```
+[Uninitialized] ──initialize()──→ [Active]
+    [Active] ──pause()──→ [Paused] ──unpause()──→ [Active]
+    [Active] ──(binary upgrade)──→ [NeedsMigration] ──migrate()──→ [Active]
+    [Active] ──freeze_config()──→ [ConfigFrozen] ──unfreeze_config()──→ [Active]
+    [Active] ──renounce_admin()──→ [AdminRenounced]  ← irreversible
+```
+
+See [`CONTRACT_LIFECYCLE.md`](CONTRACT_LIFECYCLE.md) for Mermaid diagrams of
+each flow, the combined state matrix, and the full invariants table.
 ---
 
 ## SC-100: Future Contract Roadmap
