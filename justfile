@@ -225,6 +225,34 @@ udeps:
 release-summary version="Unreleased":
     npx --yes tsx tooling/releaseSummary.ts --version {{version}}
 
+# ----------------------------------------------------------- snapshots -----
+
+# Normalize test snapshot artifacts.        [CI: Normalize snapshot artifacts]
+# Strips volatile fields (timestamp, elapsed_ms, generated_at) and sorts keys.
+# Run this after making contract changes that affect snapshot outputs.
+normalize-snapshots:
+    npx --yes tsx tools/normalize-snapshots.ts
+
+# Regenerate snapshots: run tests then normalize. [CI: E2E Tests + Normalize]
+# Use this when contract behavior changes and snapshots need updating.
+regenerate-snapshots: normalize-snapshots
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd {{crate}} && cargo test --lib
+    just normalize-snapshots
+
+# Verify snapshots are normalized (dry-run check).
+# Exits with error if snapshots need normalization without modifying files.
+verify-snapshots:
+    npx --yes tsx tools/normalize-snapshots.ts
+    @if git diff --quiet apexchainx_calculator/test_snapshots/; then \
+        echo "✓ Snapshots are normalized"; \
+    else \
+        echo "✗ Snapshots need normalization. Run 'just normalize-snapshots'"; \
+        git diff apexchainx_calculator/test_snapshots/; \
+        exit 1; \
+    fi
+
 # ----------------------------------------------------------------- all ------
 
 # Remove build artifacts.
@@ -234,3 +262,4 @@ clean:
 # Everything CI gates on, in CI's order. Run before opening a PR.
 ci: fmt-check lint check no-std test fuzz parity-check wasm
 ci: fmt-check lint check no-std machete udeps test fuzz wasm    @echo "✓ local CI equivalent passed"
+ci: fmt-check lint check no-std test fuzz wasm verify-snapshots    @echo "✓ local CI equivalent passed"
