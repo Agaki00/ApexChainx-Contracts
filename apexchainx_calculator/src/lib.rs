@@ -32,7 +32,7 @@ mod parity_tests;
 
 pub mod audit_state;
 pub mod calculation;
-pub mod config;
+pub mod api_stability;pub mod config;
 pub mod config_bundle;
 pub mod config_freeze;
 pub mod config_metadata;
