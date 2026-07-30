@@ -215,3 +215,8 @@ operations are permitted.
 state-transition diagrams for init, pause, migrate, config-freeze, admin
 transfer, and operator handoff flows, plus the combined state matrix and
 invariants table.
+## Contribution Resources
+
+- **[Contributing Guide](CONTRIBUTING.md)** — Development workflow, code style, PR checklist
+- **[Module Ownership Map](docs/MODULE_OWNERSHIP.md)** — Who reviews what: module-to-owner mapping for the contract crate, docs, CI, and tooling
+- **[API Stability Scorecard](docs/API_STABILITY_SCORECARD.md)** — Compatibility risk classification for all public entrypoints
