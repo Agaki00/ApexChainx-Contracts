@@ -135,6 +135,12 @@ Quick overview of the main lifecycle states:
 
 See [`CONTRACT_LIFECYCLE.md`](CONTRACT_LIFECYCLE.md) for Mermaid diagrams of
 each flow, the combined state matrix, and the full invariants table.
+## SC- Marker Convention
+
+Throughout the contract crate, inline comments and doc comments carry `SC-NNN`
+and `SC-W5-NNN` markers that link code to the GitHub issues that motivated the
+design. The rules for adding, updating, and retiring these markers are in
+[`docs/SC_MARKER_POLICY.md`](SC_MARKER_POLICY.md).
 ---
 
 ## SC-100: Future Contract Roadmap
