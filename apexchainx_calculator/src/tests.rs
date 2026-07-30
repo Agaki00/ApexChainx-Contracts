@@ -281,6 +281,39 @@ fn test_stranger_cannot_set_config() {
 
 #[test]
 fn test_storage_key_namespace_symbols_are_distinct() {
+    // -----------------------------------------------------------------------
+    // Storage-key collision regression test.
+    //
+    // Guards against future contributors accidentally reusing a Symbol string
+    // that is already occupied by another on-chain key.  Soroban instance
+    // storage is a flat key-value namespace: two constants that resolve to the
+    // same Symbol will silently alias the same storage slot, corrupting state.
+    //
+    // HOW TO MAINTAIN:
+    //   Every on-chain storage key constant defined in lib.rs (or re-exported
+    //   into it via `pub use`) MUST appear in this array.  When you add a new
+    //   key constant, append it here and run `cargo test --lib` to confirm
+    //   there is no collision before merging.
+    //
+    // KEY DEFINITIONS (all in apexchainx_calculator/src/lib.rs):
+    //   ADMIN_KEY                  = "ADMIN"
+    //   OPERATOR_KEY               = "OPERATOR"
+    //   PENDING_ADMIN_KEY          = "PADMIN"
+    //   PENDING_OP_KEY             = "POP"
+    //   CONFIG_KEY                 = "CONFIG"
+    //   CUSTOM_CONFIG_KEY          = "CUSTCFG"
+    //   PAUSED_KEY                 = "PAUSED"
+    //   PAUSE_INFO_KEY             = "PAUSEINF"
+    //   STATS_KEY                  = "STATS"
+    //   SEVERITY_CALC_COUNTS_KEY   = "CALCCNT"
+    //   SEVERITY_VIOL_COUNTS_KEY   = "VIOLCNT"
+    //   LAST_CALCULATION_LEDGER_KEY= "CALCLDG"
+    //   LAST_VIOLATION_LEDGER_KEY  = "VIOLLDG"
+    //   HISTORY_KEY                = "HIST"
+    //   STORAGE_VERSION_KEY        = "VER"
+    //   RETENTION_LIMIT_KEY        = "RETLIM"
+    //   LAST_CFG_UPDATE_KEY        = "LCFGUPD"  (re-exported from config_metadata)
+    // -----------------------------------------------------------------------
     let keys = [
         ADMIN_KEY,
         OPERATOR_KEY,
@@ -291,14 +324,23 @@ fn test_storage_key_namespace_symbols_are_distinct() {
         PAUSED_KEY,
         PAUSE_INFO_KEY,
         STATS_KEY,
+        SEVERITY_CALC_COUNTS_KEY,
+        SEVERITY_VIOL_COUNTS_KEY,
+        LAST_CALCULATION_LEDGER_KEY,
+        LAST_VIOLATION_LEDGER_KEY,
         HISTORY_KEY,
         STORAGE_VERSION_KEY,
         RETENTION_LIMIT_KEY,
+        LAST_CFG_UPDATE_KEY,
     ];
 
     for i in 0..keys.len() {
         for j in (i + 1)..keys.len() {
-            assert_ne!(keys[i], keys[j]);
+            assert_ne!(
+                keys[i], keys[j],
+                "storage key collision: keys[{}] == keys[{}] (both resolve to the same Symbol)",
+                i, j
+            );
         }
     }
 }
