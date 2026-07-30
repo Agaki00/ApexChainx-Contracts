@@ -290,7 +290,7 @@ Then open a pull request on GitHub with:
 - **Determinism first:** All computations must be deterministic — no floating point, no randomness
 - **Gas efficiency:** Minimize storage writes, avoid unnecessary loops
 - **Safety:** Use integer math only, validate all inputs, fail early
-- **Documentation:** All public functions must have doc comments
+- **Documentation:** All public functions must have doc comments following the canonical comment policy
 
 #### Style Rules
 
@@ -301,6 +301,7 @@ Then open a pull request on GitHub with:
 | Imports | Group: std → external crates → internal modules |
 | Formatting | `cargo fmt` (automated) |
 | Linting | `cargo clippy -- -D warnings` (no warnings allowed) |
+| Comments | Follow the canonical comment policy in [`CODING_STYLE.md`](CODING_STYLE.md) (see Part 2) |
 
 #### Example
 
@@ -537,6 +538,22 @@ Your contributions make ApexChainx better for everyone. We appreciate your time 
 
 All contributors and reviewers must follow the maintenance policies documented in
 [`docs/CONTRACT_MAINTENANCE_POLICY.md`](docs/CONTRACT_MAINTENANCE_POLICY.md).
+
+### Code Comment Policy
+
+Every Rust source file must follow the canonical code comment policy defined in
+[`CODING_STYLE.md`](CODING_STYLE.md) (Part 2). The policy distinguishes between:
+
+- **Invariants** (`// INVARIANT:`) — properties that must always be true for correctness
+- **Public API notes** (`///` doc comments) — required for every `pub` item
+- **Implementation details** (`//` inline) — non-obvious algorithm choices and workarounds
+
+The policy defines **what must** be commented, **what should not** be commented,
+and how to review comment compliance in PRs. See the complete policy in
+`CODING_STYLE.md` for the full review checklist.
+
+### Maintenance Policy Coverage
+
 This covers:
 
 - **[SC-500] `#[contracttype]` Compatibility Note Policy** (#279) — every public

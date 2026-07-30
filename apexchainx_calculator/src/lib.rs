@@ -115,6 +115,10 @@ pub(crate) const LAST_VIOLATION_LEDGER_KEY: Symbol = symbol_short!("VIOLLDG");
 pub(crate) const HISTORY_KEY: Symbol = symbol_short!("HIST");
 
 /// Current on-chain storage schema version number.
+// INVARIANT: Once written, the value at STORAGE_VERSION_KEY must only be
+// incremented by migrate(). All other read paths treat this key as read-only.
+// No two storage keys may share the same Symbol value — this key is stable
+// across all contract versions and may never be repurposed.
 pub(crate) const STORAGE_VERSION_KEY: Symbol = symbol_short!("VER");
 
 /// The storage schema version this contract binary expects.
@@ -223,59 +227,120 @@ pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
 // -----------------------------------------------------------------------
 
 /// Emitted on successful SLA calculation. Primary event for backend consumers.
+///
+/// Compatibility decision: appending new fields to the end of the payload tuple
+/// is NOT breaking. Field reordering, removal, or type changes require bumping
+/// EVENT_VERSION from "v1" to "v2". See event_schema.rs for the full payload
+/// schema and the SC-099 checklist in CONTRIBUTING.md for the review process.
 pub(crate) const EVENT_SLA_CALC: Symbol = symbol_short!("sla_calc");
 
 /// Emitted alongside sla_calc for settlement intent reconciliation.
+///
+/// Compatibility decision: settlement intent fields are ordered by settlement
+/// priority (id, status, payment, amount, hash, timestamp). Field additions
+/// go at the end; any reorder or removal requires a version bump.
 pub(crate) const EVENT_SETTLE_INTENT: Symbol = symbol_short!("set_int");
 
 /// Emitted when configuration is updated via set_config.
+///
+/// Compatibility decision: payload is (threshold_minutes, penalty_per_minute,
+/// reward_base) — the full config triple. Appending fields is safe; reordering
+/// or removing fields requires a version bump.
 pub(crate) const EVENT_CONFIG_UPD: Symbol = symbol_short!("cfg_upd");
 
 /// Emitted when the contract is paused by admin. (#27)
+///
+/// Compatibility decision: payload is `(true,)`. Empty-tuple expansion is
+/// additive and safe; changing the boolean to a different type requires a
+/// version bump.
 pub(crate) const EVENT_PAUSED: Symbol = symbol_short!("paused");
 
 /// Emitted when the contract is unpaused by admin. (#27)
+///
+/// Compatibility decision: payload is `(false,)`. Same rules as EVENT_PAUSED.
 pub(crate) const EVENT_UNPAUSED: Symbol = symbol_short!("unpause");
 
 /// Emitted when the operator address is changed. (#28)
+///
+/// Compatibility decision: payload is `(new_operator: Address,)`. Appending
+/// additional fields is safe; changing the address field type requires a
+/// version bump.
 pub(crate) const EVENT_OP_SET: Symbol = symbol_short!("op_set");
 
 /// Emitted after a prune_history call removes entries.
+///
+/// Compatibility decision: payload is `(removed_count: u32, kept_count: u32)`.
+/// Appending fields is safe; reordering or type changes require a version bump.
 pub(crate) const EVENT_PRUNED: Symbol = symbol_short!("pruned");
 
 /// Emitted after a prune_history_by_age call removes entries. (SC-063)
+///
+/// Compatibility decision: same shape as EVENT_PRUNED — intentional parallel.
+/// Field additions are safe; any structural change requires a version bump.
 pub(crate) const EVENT_PRUNED_AGE: Symbol = symbol_short!("pruned_a");
 
 /// Emitted when a new admin is proposed. (#63)
+///
+/// Compatibility decision: payload is `(new_admin: Address,)`. Additive field
+/// appends are safe; type or order changes require a version bump.
 pub(crate) const EVENT_ADMIN_PROP: Symbol = symbol_short!("adm_prop");
 
 /// Emitted when a pending admin proposal is accepted. (#63)
+///
+/// Compatibility decision: payload is intentionally empty `()`. If a payload
+/// is ever added, EVENT_VERSION must be bumped.
 pub(crate) const EVENT_ADMIN_ACC: Symbol = symbol_short!("adm_acc");
 
 /// Emitted when a pending admin proposal is cancelled. (SC-024)
+///
+/// Compatibility decision: payload is intentionally empty `()`. Same rules as
+/// EVENT_ADMIN_ACC.
 pub(crate) const EVENT_ADMIN_CAN: Symbol = symbol_short!("adm_can");
 
 /// Emitted when the admin permanently renounces their role. (#65)
+///
+/// Compatibility decision: payload is intentionally empty `()`. Renounce is
+/// irreversible; the empty payload signals the transition without extra data.
 pub(crate) const EVENT_ADMIN_REN: Symbol = symbol_short!("adm_ren");
 
 /// Emitted when a new operator is proposed. (#64)
+///
+/// Compatibility decision: payload is `(new_operator: Address,)`. Same rules
+/// as EVENT_ADMIN_PROP.
 pub(crate) const EVENT_OP_PROP: Symbol = symbol_short!("op_prop");
 
 /// Emitted when a pending operator proposal is accepted. (#64)
+///
+/// Compatibility decision: payload is intentionally empty `()`. Same rules as
+/// EVENT_ADMIN_ACC.
 pub(crate) const EVENT_OP_ACC: Symbol = symbol_short!("op_acc");
 
 /// Emitted when a pending operator proposal is cancelled. (SC-024)
+///
+/// Compatibility decision: payload is intentionally empty `()`. Same rules as
+/// EVENT_ADMIN_CAN.
 pub(crate) const EVENT_OP_CAN: Symbol = symbol_short!("op_can");
 
 /// Emitted when the configuration is frozen by admin.
+///
+/// Compatibility decision: payload is intentionally empty `()`. The freeze
+/// event carries no payload because the caller address is in topic[2].
 pub(crate) const EVENT_CONFIG_FREEZE: Symbol = symbol_short!("cfg_frz");
 
 /// Emitted when the configuration is unfrozen by admin.
+///
+/// Compatibility decision: payload is intentionally empty `()`. Same rules as
+/// EVENT_CONFIG_FREEZE.
 pub(crate) const EVENT_CONFIG_UNFREEZE: Symbol = symbol_short!("cfg_unfrz");
 
 /// Emitted when a running-stats counter saturates during increment_stats.
 /// Signals backend indexers that the on-chain total capped and now
 /// under-reports true economic exposure. (SC-W5-047)
+///
+/// Compatibility decision: payload is `(field: Symbol, previous_value: i128,
+/// attempted_increment: i128)`. This is a diagnostic-only event; appending
+/// fields is safe, but existing fields must not be reordered or re-typed
+/// without a version bump, as backend alerting pipelines parse this shape.
 pub(crate) const EVENT_STATS_SAT: Symbol = symbol_short!("stats_sat");
 
 /// Canonical event version symbol used by all events.
