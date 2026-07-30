@@ -208,25 +208,19 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Build WASM release
-        working-directory: apexchainx_calculator
-        run: cargo build --target wasm32-unknown-unknown --release
+      - name: Install just
+        run: cargo install just
 
-      - name: Generate hash
-        run: |
-          WASM=target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
-          if [ -f "$WASM" ]; then
-            sha256sum "$WASM" | awk '{print $1 "  apexchainx_calculator.wasm"}' > provenance.sha256
-            echo "Hash generated successfully"
-            cat provenance.sha256
-          else
-            echo "WASM file not found at $WASM"
-            exit 1
-          fi
+      - name: Generate and save hash
+        run: just hash-save
+
+      - name: Verify hash against committed file
+        run: just hash-verify
+        continue-on-error: true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: pr-provenance-hash
-          path: provenance.sha256
+          path: artifacts/apexchainx_calculator.wasm.sha256
           retention-days: 30
