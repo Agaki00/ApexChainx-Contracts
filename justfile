@@ -15,17 +15,89 @@
 crate := "apexchainx_calculator"
 wasm_target := "wasm32-unknown-unknown"
 
+# Pinned toolchain channel sourced from rust-toolchain.toml.
+# Kept in sync with the `channel` field so bootstrap installs the right version.
+toolchain_channel := "1.94.1"
+
 # List available recipes.
 default:
     @just --list
 
 # ----------------------------------------------------------- bootstrap ------
 
-# Bootstrap the dev environment — install toolchain, targets, and tools.
+# Bootstrap the dev environment — install pinned toolchain, WASM target, and verify setup.
+#
+# This recipe is session-safe: it is idempotent and can be re-run at any time
+# without side effects. Each step is guarded so it only performs work when
+# something is actually missing or outdated.
+#
+# What it does (in order):
+#   1. Verify that rustup is installed and reachable.
+#   2. Install / update the pinned Rust toolchain (1.94.1) if not already present.
+#   3. Add the wasm32-unknown-unknown cross-compilation target if missing.
+#   4. Confirm cargo is available on PATH.
+#   5. Print a summary and prompt the contributor to run `just ci`.
+#
+# Prerequisites (not installed by this script — see CONTRIBUTING.md):
+#   • rustup   https://rustup.rs
+#   • just     https://just.systems  (brew install just / cargo install just)
 bootstrap:
-    @echo "🔧 Bootstrapping ApexChainx development environment..."
-    rustup target add wasm32-unknown-unknown
-    @echo "✅ Bootstrap complete. Run 'just ci' to verify."
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo ""
+    echo "╔══════════════════════════════════════════════════════╗"
+    echo "║  ApexChainx — Developer Environment Bootstrap        ║"
+    echo "╚══════════════════════════════════════════════════════╝"
+    echo ""
+
+    # ── Step 1: verify rustup ──────────────────────────────────────────────
+    echo "▶ [1/4] Checking for rustup..."
+    if ! command -v rustup >/dev/null 2>&1; then
+        echo ""
+        echo "  ✗ rustup not found."
+        echo "  Install it from https://rustup.rs then re-run: just bootstrap"
+        echo ""
+        exit 1
+    fi
+    RUSTUP_VERSION=$(rustup --version 2>&1 | head -1)
+    echo "  ✓ rustup found: ${RUSTUP_VERSION}"
+
+    # ── Step 2: install / confirm pinned toolchain ────────────────────────
+    echo ""
+    echo "▶ [2/4] Ensuring pinned Rust toolchain ({{toolchain_channel}}) is installed..."
+    # `rustup toolchain install` is idempotent: it is a no-op when the toolchain
+    # is already current and only downloads when an update is needed.
+    rustup toolchain install "{{toolchain_channel}}" --component rustfmt clippy
+    echo "  ✓ Toolchain {{toolchain_channel}} ready."
+
+    # ── Step 3: add WASM target ───────────────────────────────────────────
+    echo ""
+    echo "▶ [3/4] Adding wasm32-unknown-unknown target..."
+    rustup target add {{wasm_target}} --toolchain "{{toolchain_channel}}"
+    echo "  ✓ Target {{wasm_target}} installed."
+
+    # ── Step 4: verify cargo ──────────────────────────────────────────────
+    echo ""
+    echo "▶ [4/4] Verifying cargo is available..."
+    if ! command -v cargo >/dev/null 2>&1; then
+        echo ""
+        echo "  ✗ cargo not found on PATH."
+        echo "  Ensure ~/.cargo/bin is on your PATH, then re-run: just bootstrap"
+        echo ""
+        exit 1
+    fi
+    CARGO_VERSION=$(cargo --version 2>&1)
+    echo "  ✓ cargo found: ${CARGO_VERSION}"
+
+    # ── Done ──────────────────────────────────────────────────────────────
+    echo ""
+    echo "╔══════════════════════════════════════════════════════╗"
+    echo "║  ✅  Bootstrap complete!                              ║"
+    echo "║                                                      ║"
+    echo "║  Next step: run  just ci  to verify your build.     ║"
+    echo "╚══════════════════════════════════════════════════════╝"
+    echo ""
 
 # ---------------------------------------------------------------- test ------
 

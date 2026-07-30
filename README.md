@@ -140,14 +140,24 @@ A [dev container](.devcontainer/) is provided for GitHub Codespaces and VS Code:
 ### Local Setup
 
 ```bash
-# Bootstrap the dev environment
+# 1. Install rustup (if not already installed)
+#    https://rustup.rs
+
+# 2. Install just (if not already installed)
+#    brew install just  |  cargo install just  |  https://just.systems
+
+# 3. Bootstrap the dev environment:
+#    - installs the pinned Rust 1.94.1 toolchain (rustfmt + clippy components)
+#    - adds the wasm32-unknown-unknown cross-compilation target
+#    - verifies cargo is on PATH
 just bootstrap
 
-# Run the full CI pipeline locally
+# 4. Verify your setup by running the full local CI equivalent:
 just ci
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup instructions.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup instructions and a
+description of every `just` recipe.
 
 ## Security & Supply Chain
 

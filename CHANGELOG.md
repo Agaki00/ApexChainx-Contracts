@@ -13,7 +13,7 @@
 - `docs/CONTRACT_MAINTENANCE_POLICY.md` — comprehensive maintenance policy covering `#[contracttype]` compatibility notes (#279), response-shape stability (#283), version negotiation (#284), API archetypes (#285), event payload size checks (#286), event drift review (#287), history write audit (#288), telemetry counters (#289), and role-change incident review (#290)
 - `tooling/release-summary.ts` — release summary generator for maintainers (#280)
 - `.devcontainer/` — reproducible dev container workspace with Rust + WASM target + just + Node.js (#281)
-- `just bootstrap` target — one-command local environment setup (#281)
+- `just bootstrap` target — session-safe, idempotent one-command local bootstrap for the Rust WASM contract workflow: verifies rustup, installs the pinned `1.94.1` toolchain with `rustfmt` + `clippy` components, adds `wasm32-unknown-unknown` target, and verifies `cargo` is on `PATH` (closes #257)
 - Historical parity checker test (`test_historical_parity_golden_results`) — validates current contract behavior against known golden results for release regression detection (#282)
 - `get_config_version_hash` — deterministic hash of the current config snapshot for backend parity validation
 - `get_result_schema` — explicit schema descriptor for SLA result encoding (status, payment type, rating symbols)
