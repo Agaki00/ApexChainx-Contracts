@@ -10,6 +10,7 @@
 - [Architectural Rules](#architectural-rules)
 - [Contract API Archetypes](#contract-api-archetypes)
 - [SC-100: Future Contract Roadmap](#sc-100-future-contract-roadmap)
+- [Pruning benchmark note](PRUNING_BENCHMARK_NOTE.md)
 
 ---
 
