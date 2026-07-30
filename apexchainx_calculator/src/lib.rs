@@ -269,6 +269,10 @@ pub(crate) const EVENT_VERSION: Symbol = symbol_short!("v1");
 //
 // Error codes are stable: once assigned, a code is never reused.
 // New codes are appended to the end of the enum.
+//
+// For the formal failure taxonomy (categories, severity, consumer impact,
+// and recovery strategies for every error code), see
+// [`docs/FAILURE_TAXONOMY.md`](../docs/FAILURE_TAXONOMY.md).
 // -----------------------------------------------------------------------
 
 /// Contract has already been initialized — cannot initialize twice.
@@ -566,6 +570,75 @@ pub struct ConfigUpdateInfo {
 /// to confirm the storage version matches expectations before resuming operations.
 /// If `needs_migration` is true, the admin must call `migrate` before the contract
 /// will accept versioned calls.
+///
+/// # Consumption Guide (Backend / Operator Tooling)
+///
+/// ## Startup Handshake Flow
+///
+/// 1. **Call `get_migration_state()`** immediately after establishing a connection
+///    to the contract (e.g. at backend startup, after a reconnect).
+/// 2. **Inspect `needs_migration`:**
+///    - `false` → the contract is on the expected version. Proceed with normal
+///      operations. No action needed.
+///    - `true`  → the contract storage version differs from what this binary
+///      expects. **Do not** issue operational transactions (`calculate_sla`,
+///      `set_config`, `pause`, etc.) — they will fail with `VersionMismatch`.
+/// 3. **If `needs_migration` is `true`, compare the versions:**
+///    - If `stored_version < expected_version` → the contract is behind.
+///      An admin must invoke `migrate()` to upgrade the storage layout.
+///    - If `stored_version > expected_version` → the contract is ahead.
+///      The backend binary is outdated and must be upgraded first.
+/// 4. **Poll after migration:** Re-call `get_migration_state()` after `migrate()`
+///    completes to confirm `needs_migration` is now `false`.
+///
+/// ## Operator Tooling Integration
+///
+/// - **Monitoring alerts:** Set up a health-check loop that calls
+///   `get_migration_state()` every N blocks. Alert if `needs_migration` flips to
+///   `true` unexpectedly (indicates an unauthorised upgrade or state corruption).
+/// - **Deployment pipelines:** Add a pre-deployment step that reads the current
+///   `stored_version` from the live contract and compares it against the
+///   `expected_version` of the binary being deployed. Block the deployment if
+///   `needs_migration` would be `true` after upgrade.
+/// - **Canary checks:** Before rolling out a new backend version to all
+///   instances, have a canary instance call `get_migration_state()` against a
+///   staging contract that has been upgraded. Verify `needs_migration` is
+///   `false` before promoting the release.
+///
+/// ## Error Handling
+///
+/// - `NotInitialized` is returned if the contract has never been initialized
+///   (no `STORAGE_VERSION_KEY` present). This is a permanent error — the
+///   contract must be initialized before any operations are possible.
+/// - `get_migration_state()` intentionally **bypasses** `check_version()` so it
+///   remains callable even when the contract is in a pre-migration state.
+///
+/// ## Example: Backend Startup Sequence
+///
+/// ```ignore
+/// // Pseudocode — adapt to your language/runtime
+/// let state = contract.get_migration_state();
+/// if state.needs_migration {
+///     if state.stored_version < state.expected_version {
+///         log.warn("Contract needs upgrade. Calling migrate()...");
+///         admin_wallet.invoke(contract.migrate());
+///         // Re-check after migration
+///         state = contract.get_migration_state();
+///         if state.needs_migration {
+///             throw new Error("Migration did not resolve version mismatch");
+///         }
+///     } else {
+///         throw new Error(
+///             "Backend is outdated. Expected version " +
+///             state.expected_version + " but contract is at " +
+///             state.stored_version);
+///     }
+/// }
+/// log.info("Contract is ready. Storage version: " + state.stored_version);
+/// ```
+///
+/// See [`docs/MIGRATION_STATE_CONSUMPTION.md`] for the full consumption guide
+/// with diagrams, troubleshooting, and operator runbook.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StorageVersionInfo {
@@ -2616,6 +2689,33 @@ impl SLACalculatorContract {
     /// Backend consumers should call this after any contract upgrade to confirm
     /// the storage version matches expectations. If `needs_migration` is true,
     /// the admin must call `migrate` before versioned endpoints will respond.
+    ///
+    /// # Startup Handshake Protocol
+    ///
+    /// 1. Call `get_migration_state()` at backend startup or after reconnect.
+    /// 2. Check `needs_migration`:
+    ///    - `false` → contract is ready. Proceed with normal operations.
+    ///    - `true`  → Do NOT issue operational transactions until migration
+    ///      is resolved. They will fail with `VersionMismatch`.
+    /// 3. If `stored_version < expected_version` → admin must call `migrate()`.
+    ///    If `stored_version > expected_version` → backend binary is outdated.
+    /// 4. Re-check after migration to confirm `needs_migration` is `false`.
+    ///
+    /// # Operator Monitoring
+    ///
+    /// - **Health-check loop:** Poll every N blocks. Alert if
+    ///   `needs_migration` flips to `true` unexpectedly.
+    /// - **Pre-deployment gate:** Compare `stored_version` of live contract
+    ///   against `expected_version` of binary being deployed. Block if
+    ///   migration would be required.
+    /// - **Canary verification:** Before rolling out a new backend version,
+    ///   have a canary instance verify against a staging contract.
+    ///
+    /// See [`docs/MIGRATION_STATE_CONSUMPTION.md`](../docs/MIGRATION_STATE_CONSUMPTION.md)
+    /// for the full consumption guide with diagrams, troubleshooting, and
+    /// operator runbook.
+    ///
+    /// # Design
     ///
     /// This function intentionally bypasses `check_version` so it remains
     /// callable even when the contract is in a pre-migration state.
