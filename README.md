@@ -159,6 +159,13 @@ just ci
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup instructions and a
 description of every `just` recipe.
 
+## Versioning & Compatibility
+
+- **[Compatibility Tracking Matrix](docs/COMPATIBILITY_TRACKING_MATRIX.md)** — Tracking matrix for event-schema drift, storage-version drift, and deployment compatibility across releases.
+- **[Reserved Keys & Event Topics Policy](docs/RESERVED_KEYS_POLICY.md)** — Reserved key prefix conventions and event-topic namespace rules.
+- **[Event Topic Compatibility](docs/EVENT_TOPIC_COMPATIBILITY.md)** — Event topic compatibility and versioning policies.
+- **[Contract API Compatibility](docs/CONTRACT_API_COMPATIBILITY.md)** — API compatibility assertions for backend integration.
+
 ## Security & Supply Chain
 
 - **[WASM Binary Reproducibility Policy](docs/WASM_REPRODUCIBILITY_POLICY.md)** — Build input recording, artifact checksum provenance, and one-step maintainer verification for release WASM binaries.
