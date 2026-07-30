@@ -384,6 +384,7 @@ Before opening a PR, consult the **[Module Ownership Map](docs/MODULE_OWNERSHIP.
 - [ ] `cargo check --target wasm32-unknown-unknown --lib` passes (no-std check)
 - [ ] New public functions are added to the result schema or documented
 - [ ] Any breaking change to `SLAResult` increments `RESULT_SCHEMA_VERSION`
+- [ ] Any new, removed, or renamed storage key satisfies the [Storage Key Migration Checklist](docs/STORAGE_KEY_MIGRATION_CHECKLIST.md) (SC-509)
 
 ### PR Description Template
 
@@ -668,6 +669,13 @@ This covers:
 - **[SC-509] SLAError Addition Workflow** (#253) — step-by-step guide for adding,
   deprecating, or reviewing `SLAError` variants without breaking backend adapter
   logic. See [`docs/sla-error-additions-guide.md`](docs/sla-error-additions-guide.md).
+
+### Storage Key Migration
+
+When adding, removing, or renaming any `*_KEY` constant in
+`apexchainx_calculator/src/lib.rs`, work through the
+**[SC-509] [Storage Key Migration Checklist](docs/STORAGE_KEY_MIGRATION_CHECKLIST.md)**
+(#266) and include your answers in the PR description.
 
 ### Release Summary Generator (#280)
 
