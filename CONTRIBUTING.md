@@ -507,7 +507,9 @@ This covers:
 - **[SC-501] Response-Shape Stability Policy** (#283) — every `#[contracttype]`
   return type is assigned a stability tier (Stable, Versioned, Experimental).
 - **[SC-502] Version Negotiation Protocol Note** (#284) — safe vs. breaking
-  changes to `get_version_info()`.
+  changes to `get_version_info()`. For the multi-contract negotiation protocol
+  itself, see
+  [`docs/VERSION_NEGOTIATION_CONTRIBUTOR_GUIDE.md`](docs/VERSION_NEGOTIATION_CONTRIBUTOR_GUIDE.md).
 - **[SC-503] API Archetype Note** (#285) — three function archetypes: Read-Only,
   Mutating (Operator), Privileged (Admin).
 - **[SC-504] Event Payload Size Check** (#286) — payload size assertions required

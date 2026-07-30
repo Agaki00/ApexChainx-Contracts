@@ -26,6 +26,15 @@
 //! Existing backend-facing endpoints (`get_version_info`, `get_migration_state`)
 //! on the SLA calculator are extended with this protocol so that multi-contract
 //! backends can verify all contracts agree before deploying.
+//!
+//! # Changing this module
+//!
+//! This protocol runs against independently deployed peers, so a small change
+//! here can break interoperability across contracts. Before editing, read
+//! `docs/VERSION_NEGOTIATION_CONTRIBUTOR_GUIDE.md` for the compatibility
+//! constraints (append-only payloads, ordinal `NegotiationOutcome` variants,
+//! fail-closed negotiation, directional version-constant rules) and the
+//! author/reviewer checklists that PRs touching this file must satisfy.
 
 use soroban_sdk::{contracttype, symbol_short, Env, Symbol, Vec};
 
