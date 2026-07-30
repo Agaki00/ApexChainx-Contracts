@@ -269,6 +269,10 @@ pub(crate) const EVENT_VERSION: Symbol = symbol_short!("v1");
 //
 // Error codes are stable: once assigned, a code is never reused.
 // New codes are appended to the end of the enum.
+//
+// For the formal failure taxonomy (categories, severity, consumer impact,
+// and recovery strategies for every error code), see
+// [`docs/FAILURE_TAXONOMY.md`](../docs/FAILURE_TAXONOMY.md).
 // -----------------------------------------------------------------------
 
 /// Contract has already been initialized — cannot initialize twice.
