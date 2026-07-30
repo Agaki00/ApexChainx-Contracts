@@ -7285,3 +7285,212 @@ fn test_historical_parity_golden_results() {
     assert_eq!(schema.schema_version, 1, "Result schema version changed — check migration notes");
     assert_eq!(schema.deprecated_symbols.len(), 0, "Unexpected deprecated symbols in v1");
 }
+
+
+// ============================================================
+// Issue #261 – Contract state fingerprint for release review and upgrade planning
+// ============================================================
+//
+// Acceptance criteria:
+// - The fingerprint includes storage_version, result_schema_version,
+//   config_version_hash, is_paused, needs_migration, is_config_frozen, and captured_at.
+// - The function is callable without auth (read-only).
+// - The function bypasses check_version so it works in a pre-migration state.
+// - The captured_at field contains the ledger timestamp.
+
+#[test]
+fn test_261_fingerprint_includes_all_required_fields() {
+    let (_env, client, _actors) = setup();
+    let fingerprint = client.get_contract_state_fingerprint();
+    
+    assert_eq!(fingerprint.contract_name, symbol_short!("sla_calc"));
+    assert_eq!(fingerprint.storage_version, 1);
+    assert_eq!(fingerprint.result_schema_version, 1);
+    assert!(fingerprint.config_version_hash > 0, "config hash must be non-zero");
+    assert_eq!(fingerprint.is_paused, false);
+    assert_eq!(fingerprint.needs_migration, false);
+    assert_eq!(fingerprint.is_config_frozen, false);
+    // captured_at should be the ledger timestamp (0 in test env by default)
+    assert_eq!(fingerprint.captured_at, 0);
+}
+
+#[test]
+fn test_261_fingerprint_is_deterministic_on_repeated_calls() {
+    let (_env, client, _actors) = setup();
+    let fp1 = client.get_contract_state_fingerprint();
+    let fp2 = client.get_contract_state_fingerprint();
+    
+    assert_eq!(fp1.storage_version, fp2.storage_version);
+    assert_eq!(fp1.result_schema_version, fp2.result_schema_version);
+    assert_eq!(fp1.config_version_hash, fp2.config_version_hash);
+    assert_eq!(fp1.is_paused, fp2.is_paused);
+    assert_eq!(fp1.needs_migration, fp2.needs_migration);
+    assert_eq!(fp1.is_config_frozen, fp2.is_config_frozen);
+}
+
+#[test]
+fn test_261_fingerprint_reflects_paused_state() {
+    let (env, client, actors) = setup();
+    
+    let fp_before = client.get_contract_state_fingerprint();
+    assert_eq!(fp_before.is_paused, false);
+    
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "maintenance"));
+    
+    let fp_after = client.get_contract_state_fingerprint();
+    assert_eq!(fp_after.is_paused, true);
+}
+
+#[test]
+fn test_261_fingerprint_reflects_config_frozen_state() {
+    let (_env, client, actors) = setup();
+    
+    let fp_before = client.get_contract_state_fingerprint();
+    assert_eq!(fp_before.is_config_frozen, false);
+    
+    client.freeze_config(&actors.admin);
+    
+    let fp_after = client.get_contract_state_fingerprint();
+    assert_eq!(fp_after.is_config_frozen, true);
+}
+
+#[test]
+fn test_261_fingerprint_config_hash_changes_on_config_update() {
+    let (_env, client, actors) = setup();
+    
+    let fp_before = client.get_contract_state_fingerprint();
+    let hash_before = fp_before.config_version_hash;
+    
+    client.set_config(&actors.admin, &symbol_short!("critical"), &20, &200, &1000);
+    
+    let fp_after = client.get_contract_state_fingerprint();
+    let hash_after = fp_after.config_version_hash;
+    
+    assert_ne!(hash_before, hash_after, "config hash must change after config update");
+}
+
+#[test]
+fn test_261_fingerprint_accessible_without_auth() {
+    // The fingerprint function should not require auth — it's a pure read-only view.
+    // This is implicitly tested by all previous tests, but let's be explicit.
+    let (_env, client, _actors) = setup();
+    
+    // No auth required — just call it directly
+    let fingerprint = client.get_contract_state_fingerprint();
+    assert_eq!(fingerprint.contract_name, symbol_short!("sla_calc"));
+}
+
+#[test]
+fn test_261_fingerprint_works_in_pre_migration_state() {
+    // Force the contract into a pre-migration state (version mismatch)
+    // and verify the fingerprint still returns successfully with needs_migration=true.
+    let (env, client, actors) = setup();
+    
+    // Manually write a different storage version to simulate pre-migration
+    env.as_contract(&client.address, || {
+        env.storage().instance().set(&symbol_short!("VER"), &0u32);
+    });
+    
+    // The fingerprint must still work (bypasses check_version)
+    let fingerprint = client.get_contract_state_fingerprint();
+    assert_eq!(fingerprint.storage_version, 0);
+    assert_eq!(fingerprint.needs_migration, true);
+}
+
+#[test]
+fn test_261_fingerprint_before_and_after_upgrade_differ() {
+    // Simulate an upgrade workflow: capture fingerprint, trigger migration,
+    // capture again, and verify config_version_hash remained stable but
+    // needs_migration flipped.
+    let (env, client, actors) = setup();
+    
+    // Force version 0 to simulate pre-upgrade state
+    env.as_contract(&client.address, || {
+        env.storage().instance().set(&symbol_short!("VER"), &0u32);
+    });
+    
+    let fp_before = client.get_contract_state_fingerprint();
+    assert_eq!(fp_before.storage_version, 0);
+    assert_eq!(fp_before.needs_migration, true);
+    
+    // Migrate
+    client.migrate(&actors.admin);
+    
+    let fp_after = client.get_contract_state_fingerprint();
+    assert_eq!(fp_after.storage_version, 1);
+    assert_eq!(fp_after.needs_migration, false);
+    
+    // Config hash should remain unchanged across migration if no config changed
+    assert_eq!(fp_before.config_version_hash, fp_after.config_version_hash);
+}
+
+#[test]
+fn test_261_fingerprint_use_case_incident_response_audit() {
+    // Use case: during an incident, quickly surface the contract's posture.
+    let (env, client, actors) = setup();
+    
+    // Simulate incident: admin pauses the contract
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "incident"));
+    
+    // Backend calls fingerprint to check state
+    let fingerprint = client.get_contract_state_fingerprint();
+    
+    assert_eq!(fingerprint.is_paused, true);
+    assert_eq!(fingerprint.is_config_frozen, false);
+    assert_eq!(fingerprint.needs_migration, false);
+    
+    // All critical state visible in one call
+}
+
+#[test]
+fn test_261_fingerprint_use_case_pre_upgrade_audit() {
+    // Use case: before deploying a new contract version, capture the fingerprint
+    // to compare against post-upgrade state.
+    let (_env, client, _actors) = setup();
+    
+    let fp_pre_upgrade = client.get_contract_state_fingerprint();
+    
+    // Verify all expected pre-upgrade state
+    assert_eq!(fp_pre_upgrade.storage_version, 1);
+    assert_eq!(fp_pre_upgrade.needs_migration, false);
+    assert!(fp_pre_upgrade.config_version_hash > 0);
+    
+    // In a real workflow, this fingerprint would be stored and compared
+    // against the post-upgrade fingerprint to verify only expected state changed.
+}
+
+#[test]
+fn test_261_fingerprint_matches_individual_queries() {
+    // Verify the fingerprint fields match what individual queries return.
+    let (_env, client, _actors) = setup();
+    
+    let fingerprint = client.get_contract_state_fingerprint();
+    let version_info = client.get_version_info();
+    let migration_state = client.get_migration_state();
+    let config_hash = client.get_config_version_hash();
+    let is_paused = client.is_paused();
+    let is_frozen = client.is_config_frozen();
+    
+    assert_eq!(fingerprint.storage_version, version_info.storage_version);
+    assert_eq!(fingerprint.result_schema_version, version_info.result_schema_version);
+    assert_eq!(fingerprint.needs_migration, version_info.needs_migration);
+    assert_eq!(fingerprint.storage_version, migration_state.stored_version);
+    assert_eq!(fingerprint.needs_migration, migration_state.needs_migration);
+    assert_eq!(fingerprint.config_version_hash, config_hash);
+    assert_eq!(fingerprint.is_paused, is_paused);
+    assert_eq!(fingerprint.is_config_frozen, is_frozen);
+}
+
+#[test]
+#[should_panic]
+fn test_261_fingerprint_fails_on_uninitialized_contract() {
+    // Before initialize(), the contract has no STORAGE_VERSION_KEY,
+    // so get_contract_state_fingerprint should return NotInitialized.
+    let env = Env::default();
+    env.mock_all_auths();
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    
+    // No initialize() called — fingerprint must fail
+    client.get_contract_state_fingerprint();
+}

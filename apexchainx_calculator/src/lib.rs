@@ -624,6 +624,38 @@ pub struct HealthcheckResult {
     pub status: Symbol,
 }
 
+/// #261 – Contract state fingerprint for release review and upgrade planning.
+///
+/// Provides a compact, deterministic snapshot of the contract's live state by
+/// combining storage version, configuration hash, pause state, and migration
+/// posture into a single reviewable summary. This is safe to call on a live
+/// contract without mutating state.
+///
+/// Backend consumers can call this before and after upgrades or during incident
+/// response to quickly audit the contract's current posture without issuing
+/// separate queries for each field.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractStateFingerprint {
+    /// Human-readable contract name for log correlation.
+    pub contract_name: Symbol,
+    /// Storage schema version stamped in contract storage.
+    pub storage_version: u32,
+    /// Result schema version for SLAResult field layout.
+    pub result_schema_version: u32,
+    /// Deterministic hash of the current configuration snapshot.
+    /// Changes whenever set_config is called with different values.
+    pub config_version_hash: u64,
+    /// True when the contract is currently paused.
+    pub is_paused: bool,
+    /// True when stored storage version differs from the binary's expected version.
+    pub needs_migration: bool,
+    /// True when the configuration is frozen (admin cannot call set_config).
+    pub is_config_frozen: bool,
+    /// Ledger timestamp when this fingerprint was captured (seconds).
+    pub captured_at: u64,
+}
+
 /// SC-W5-029 – Combined version negotiation response for backend startup handshake.
 ///
 /// Backend consumers call `get_version_info` once at startup (or after an upgrade)
@@ -2684,5 +2716,88 @@ impl SLACalculatorContract {
             contract_name: symbol_short!("sla_calc"),
             status,
         }
+    }
+
+    // -------------------------------------------------------------------
+    // #261 – Contract state fingerprint for release review and upgrade planning
+    // -------------------------------------------------------------------
+
+    /// Returns a compact, deterministic snapshot of the contract's live state.
+    ///
+    /// Combines storage version, configuration hash, pause state, configuration
+    /// freeze state, and migration posture into a single fingerprint object.
+    /// This is a read-only view that does **not** require authentication,
+    /// does **not** mutate state, and does **not** emit events.
+    ///
+    /// # Use Cases
+    ///
+    /// - **Pre-upgrade audit**: capture the fingerprint before deploying a new
+    ///   contract version, then compare it against the post-upgrade fingerprint
+    ///   to verify only expected state changed.
+    /// - **Incident response**: quickly surface the contract's posture during an
+    ///   incident without issuing separate queries for version, config, pause, etc.
+    /// - **Backend health checks**: backends can cache this fingerprint and poll
+    ///   it periodically to detect unexpected state drift (e.g., an admin paused
+    ///   the contract or froze the config without notifying the backend).
+    ///
+    /// # Returns
+    ///
+    /// A `ContractStateFingerprint` containing:
+    /// - `contract_name`: fixed to "sla_calc"
+    /// - `storage_version`: the version currently stamped in storage
+    /// - `result_schema_version`: the `SLAResult` schema version this binary expects
+    /// - `config_version_hash`: deterministic hash of the current config snapshot
+    /// - `is_paused`: true when the contract is paused
+    /// - `needs_migration`: true when `storage_version != STORAGE_VERSION`
+    /// - `is_config_frozen`: true when the config is frozen
+    /// - `captured_at`: ledger timestamp when this fingerprint was captured (seconds)
+    ///
+    /// # Errors
+    ///
+    /// Returns `NotInitialized` if the contract has never been initialized (no
+    /// `STORAGE_VERSION_KEY` present). All other contract states return a valid
+    /// fingerprint, including pre-migration and paused states.
+    ///
+    /// # Safety
+    ///
+    /// This function intentionally bypasses `check_version` so it remains callable
+    /// even when the contract is in a pre-migration state (`needs_migration == true`).
+    /// The fingerprint itself reports the migration state, so backends can decide
+    /// whether to proceed or wait for `migrate()` to complete.
+    pub fn get_contract_state_fingerprint(env: Env) -> Result<ContractStateFingerprint, SLAError> {
+        // Read storage version — this is the only field that can cause NotInitialized.
+        let stored_version: u32 = env
+            .storage()
+            .instance()
+            .get(&STORAGE_VERSION_KEY)
+            .ok_or(SLAError::NotInitialized)?;
+
+        // Compute needs_migration without requiring check_version to pass.
+        let needs_migration = stored_version != STORAGE_VERSION;
+
+        // Config version hash computation is safe even in pre-migration state
+        // because load_config works across all initialized states.
+        let config_version_hash = match Self::compute_config_version_hash(&env) {
+            Ok(hash) => hash,
+            Err(_) => 0u64, // If config is unreadable, use sentinel 0
+        };
+
+        // Pause and freeze state default to false if keys are absent.
+        let is_paused: bool = env.storage().instance().get(&PAUSED_KEY).unwrap_or(false);
+        let is_config_frozen: bool = config_freeze::is_config_frozen(&env);
+
+        // Capture the current ledger timestamp.
+        let captured_at = env.ledger().timestamp();
+
+        Ok(ContractStateFingerprint {
+            contract_name: symbol_short!("sla_calc"),
+            storage_version: stored_version,
+            result_schema_version: RESULT_SCHEMA_VERSION,
+            config_version_hash,
+            is_paused,
+            needs_migration,
+            is_config_frozen,
+            captured_at,
+        })
     }
 }
