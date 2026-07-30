@@ -157,6 +157,8 @@ A [dev container](.devcontainer/) is provided for GitHub Codespaces and VS Code:
 # - Node.js + npx for tooling scripts
 ```
 
+See [`.devcontainer/README.md`](.devcontainer/README.md) for detailed instructions.
+
 ### Local Setup
 
 ```bash
@@ -174,6 +176,9 @@ just bootstrap
 
 # 4. Verify your setup by running the full local CI equivalent:
 just ci
+
+# Fast release-candidate validation (before opening a PR)
+just release-replay
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup instructions and a
