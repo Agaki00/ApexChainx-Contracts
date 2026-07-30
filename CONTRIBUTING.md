@@ -334,6 +334,10 @@ impl SLAContract {
 
 ## ✅ Pull Request Guidelines
 
+### API Stability Consideration
+
+Before modifying any public contract entrypoint, consult the **[API Stability Scorecard](docs/API_STABILITY_SCORECARD.md)** to determine whether your change is additive (safe) or breaking (requires a version bump and/or migration). The scorecard classifies every public function by stability tier (🔒 Frozen, ⚠️ Stable, 🔄 Evolving, 🛡️ Admin-Gated) and provides a change impact guide.
+
 ### Before Submitting Checklist
 
 #### Required Checks

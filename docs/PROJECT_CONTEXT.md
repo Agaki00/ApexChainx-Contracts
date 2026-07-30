@@ -88,6 +88,10 @@ reference them until they appear in the repository.
 
 Storage-version upgrades follow the [Upgrade Playbook](UPGRADE_PLAYBOOK.md), which documents the complete preflight → migration → verification → rollback workflow for operators.
 
+### API Stability
+
+All public contract entrypoints are classified by compatibility risk in the **[API Stability Scorecard](API_STABILITY_SCORECARD.md)**. Contributors must consult this scorecard before modifying any public function signature to determine whether the change is additive or breaking.
+
 ### Contribution Guidelines for New Crates
 
 1. **Open a tracking issue** before creating the crate directory
