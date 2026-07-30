@@ -21,17 +21,35 @@ Contract WASM binaries must be compiled using standard Soroban tooling:
 cargo build --target wasm32-unknown-unknown --release
 ```
 
-### 2.2 SHA-256 Checksum Provenance
-Generate and verify SHA-256 checksums for target outputs:
+### 2.2 SHA-256 Checksum Provenance (One-Line Commands)
+
+The `justfile` provides contributor-friendly recipes for hash management:
+
+**Generate and save hash to `artifacts/`:**
 ```bash
-sha256sum target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm > artifacts/apexchainx_calculator.wasm.sha256
+just hash-save
 ```
 
-### 2.3 Verification Policy
-CI validation checks that the compiled WASM checksum matches the committed provenance artifact:
+**Verify hash against committed file:**
 ```bash
-sha256sum -c artifacts/apexchainx_calculator.wasm.sha256
+just hash-verify
 ```
+
+**Display hash without saving:**
+```bash
+just hash
+```
+
+These commands handle cross-platform differences (Linux `sha256sum` vs macOS `shasum`) automatically and ensure the hash file is stored in the correct location (`artifacts/apexchainx_calculator.wasm.sha256`).
+
+### 2.3 Verification Policy
+
+CI validation checks that the compiled WASM checksum matches the committed provenance artifact. Contributors should run `just hash-verify` before committing to ensure their local build matches the committed hash.
+
+If the hash verification fails:
+1. Check if contract code changed — if so, run `just hash-save` to update the committed hash
+2. Check if toolchain changed — ensure `rust-toolchain.toml` is pinned
+3. Check for non-deterministic builds — verify no timestamp or random values in contract
 
 ---
 

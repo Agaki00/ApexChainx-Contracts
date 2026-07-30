@@ -90,6 +90,46 @@ hash: wasm-release
         shasum -a 256 "$wasm" | awk '{print $1 "  {{crate}}.wasm"}'
     fi
 
+# Save release WASM hash to artifacts/.    [CI: Save hash for provenance]
+hash-save: wasm-release
+    #!/usr/bin/env bash
+    set -euo pipefail
+    wasm="target/{{wasm_target}}/release/{{crate}}.wasm"
+    hash_file="artifacts/{{crate}}.wasm.sha256"
+    mkdir -p artifacts
+    if [ ! -f "$wasm" ]; then
+        echo "WASM file not found at $wasm" >&2
+        exit 1
+    fi
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$wasm" | awk '{print $1 "  {{crate}}.wasm"}' > "$hash_file"
+    else
+        shasum -a 256 "$wasm" | awk '{print $1 "  {{crate}}.wasm"}' > "$hash_file"
+    fi
+    echo "Hash saved to $hash_file"
+    cat "$hash_file"
+
+# Verify release WASM hash against committed file. [CI: Verify hash provenance]
+hash-verify: wasm-release
+    #!/usr/bin/env bash
+    set -euo pipefail
+    wasm="target/{{wasm_target}}/release/{{crate}}.wasm"
+    hash_file="artifacts/{{crate}}.wasm.sha256"
+    if [ ! -f "$hash_file" ]; then
+        echo "Hash file not found at $hash_file" >&2
+        echo "Run 'just hash-save' to generate it." >&2
+        exit 1
+    fi
+    if [ ! -f "$wasm" ]; then
+        echo "WASM file not found at $wasm" >&2
+        exit 1
+    fi
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum -c "$hash_file"
+    else
+        shasum -a 256 -c "$hash_file"
+    fi
+
 # --------------------------------------------------------------- tooling -----
 
 # Generate a ship-review note from CHANGELOG.md.
