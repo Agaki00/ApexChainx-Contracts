@@ -8,6 +8,7 @@
 - [Repository Architecture](#repository-architecture)
 - [System Flow](#system-flow)
 - [Architectural Rules](#architectural-rules)
+- [Contract API Archetypes](#contract-api-archetypes)
 - [SC-100: Future Contract Roadmap](#sc-100-future-contract-roadmap)
 
 ---
@@ -39,6 +40,62 @@ The ApexChainx platform is composed of three repositories:
 1. **Frontend never calls contracts directly** — all contract interactions go through the backend
 2. **Backend is the exclusive bridge** — translates contract data to frontend-friendly responses
 3. **Contracts are execution-layer only** — pure deterministic computation, no external dependencies
+
+---
+
+## Contract API Archetypes
+
+Every public entrypoint in `apexchainx_calculator` falls into one of three
+archetypes. This classification is the fastest way for contributors and
+integrators to decide whether a call is safe to make freely, requires the
+operator role, or is gated behind admin authority.
+
+### Read-only (no auth required, no state written)
+
+Safe to call by anyone at any time, including while the contract is paused.
+No on-chain state is written and no events are emitted.
+
+| Group | Methods |
+|-------|---------|
+| Healthcheck & version | `healthcheck`, `get_version_info`, `get_migration_state` |
+| Pause / freeze status | `is_paused`, `get_pause_info`, `is_config_frozen` |
+| Config views | `get_config`, `get_config_snapshot`, `get_config_version_hash`, `list_configs`, `get_last_config_update`, `get_config_bundle` |
+| Custom severity views | `get_custom_severity`, `get_custom_config_snapshot` |
+| Stats & telemetry | `get_stats`, `get_economic_exposure`, `get_severity_telemetry` |
+| History views | `get_history`, `get_history_page`, `get_history_by_outage`, `get_latest_by_outage` |
+| Role queries | `get_admin`, `get_operator`, `get_pending_admin`, `get_pending_operator` |
+| Introspection | `get_result_schema`, `get_failure_schema`, `get_contract_metadata`, `get_full_audit_state` |
+| Retention helpers | `get_retention_limit`, `get_config_count`, `get_storage_version` |
+| View-mode calculation | `calculate_sla_view`, `replay_calculate_sla` |
+
+### Mutating — operator role
+
+Writes state and emits events. Only the current **operator** address may call
+these.
+
+| Method | What it writes |
+|--------|----------------|
+| `calculate_sla` | Appends a result to history, updates cumulative stats and per-severity telemetry, emits `sla_calc` and `set_int` events. Idempotent on exact replay; rejects conflicting duplicates. |
+
+### Privileged — admin role
+
+Only the current **admin** address may call these. They control lifecycle,
+configuration, and role management. Some are irreversible (`renounce_admin`)
+or have broad blast radius (`prune_history`).
+
+| Group | Methods |
+|-------|---------|
+| Lifecycle | `initialize`, `migrate` |
+| Config management | `set_config`, `set_custom_severity`, `remove_custom_severity`, `freeze_config`, `unfreeze_config` |
+| Operational controls | `pause`, `unpause`, `set_retention_limit` |
+| Admin transfer | `propose_admin`, `accept_admin`, `cancel_admin_proposal`, `renounce_admin` |
+| Operator transfer | `set_operator` *(legacy direct)*, `propose_operator`, `accept_operator`, `cancel_operator_proposal` |
+| History pruning | `prune_history`, `prune_history_by_age` |
+
+> **Quick rule of thumb:** methods whose names start with `get_`, `is_`,
+> `list_`, `healthcheck`, `calculate_sla_view`, or `replay_calculate_sla` are
+> read-only and safe to call freely. `calculate_sla` requires the operator
+> role. Everything else requires the admin role.
 
 ---
 
