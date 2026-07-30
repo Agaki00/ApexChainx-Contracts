@@ -61,6 +61,13 @@ use crate::config_bundle::ConfigBundle;
 //   - Within the 9-character Symbol limit for Soroban
 //
 // References: Issue numbers track the original feature requirements.
+//
+// MAINTENANCE: When you add a new storage key constant here (or re-export
+// one via `pub use`), you MUST also add it to the collision regression test:
+//   apexchainx_calculator/src/tests.rs
+//   → test_storage_key_namespace_symbols_are_distinct
+// That test is the sole enforcement mechanism for namespace uniqueness.
+// A missing entry is a silent aliasing bug waiting to happen.
 
 /// Admin address — set during initialize, governs config and roles.
 pub(crate) const ADMIN_KEY: Symbol = symbol_short!("ADMIN");
