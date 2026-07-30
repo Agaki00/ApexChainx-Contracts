@@ -76,6 +76,13 @@ reference them until they appear in the repository.
 | `settlement` | Planned | `payment_escrow` | Splits shared outage costs between multiple parties |
 | `governance` | Planned | — | On-chain admin config changes with time-locked execution |
 
+### Event Ordering Guarantees
+
+For the documented event ordering contract that backend consumers can rely on
+for correct event processing, see **[Event Ordering Guarantees](./event-ordering-guarantees.md)**.
+This document describes the deterministic event sequencing within a single
+ledger, backed by the test suite in `apexchainx_calculator/src/event_ordering_tests.rs`.
+
 ### Integration Expectations
 
 - The backend (`apexchainx-be`) currently integrates only with `apexchainx_calculator`

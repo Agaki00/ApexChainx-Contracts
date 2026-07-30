@@ -241,3 +241,9 @@ set_config(admin, high, 30, 25, 750);         // → InvalidPenalty (high 25 < m
 | Success events | Successful config updates emit versioned `cfg_upd` events |
 | Failure behavior | Failed validations do not emit events or consume extra gas |
 | Determinism | Same invalid inputs always produce same error codes |
+
+## See Also
+
+- **[Severity Compatibility Matrix](./severity-compatibility-matrix.md)** — Canonical vs. custom severity families, additive vs. breaking change classification, release planning checklist.
+- **[Event Ordering Guarantees](./event-ordering-guarantees.md)** — Deterministic event sequencing contract for backend consumers.
+- **[CONTRACT_API_COMPATIBILITY.md](./CONTRACT_API_COMPATIBILITY.md)** — API surface stability and deprecation policy.
