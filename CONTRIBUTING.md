@@ -133,13 +133,32 @@ uvicorn main:app --reload
 **Smart Contracts:**
 ```bash
 cd apexchainx-contracts
-# Install Soroban CLI if you haven't
-cargo install --locked soroban-cli
-# Build contracts
-make build
-# Run tests
-make test
+
+# 1. Install rustup (if not already installed)
+#    https://rustup.rs
+
+# 2. Install just (if not already installed)
+#    brew install just  |  cargo install just  |  https://just.systems
+
+# 3. Bootstrap the dev environment in one command:
+#    - installs the pinned Rust 1.94.1 toolchain with rustfmt + clippy
+#    - adds the wasm32-unknown-unknown cross-compilation target
+#    - verifies cargo is on PATH
+#    (idempotent: safe to re-run at any time)
+just bootstrap
+
+# 4. Verify your setup against the full local CI equivalent:
+just ci
 ```
+
+> **Pinned toolchain:** The project uses Rust `1.94.1` (see `rust-toolchain.toml`).
+> `just bootstrap` installs this version automatically. You do not need to set
+> it manually — `rustup` reads `rust-toolchain.toml` and selects the right
+> version for every `cargo` command in this directory.
+
+> **Session safety:** `just bootstrap` is idempotent. Running it again after a
+> fresh shell or a `rustup update` is safe and will only download what is
+> missing or outdated.
 
 ## 📝 Development Workflow
 
@@ -532,6 +551,38 @@ for CI or `--check` for format validation.
 A `.devcontainer/` setup is provided for GitHub Codespaces and VS Code Dev
 Containers. The devcontainer includes Rust, the `wasm32-unknown-unknown` target,
 `just`, and Node.js. Run `just bootstrap` to set up your local environment.
+
+### Local Bootstrap (#257)
+
+`just bootstrap` is the single, session-safe entry point for local contributors:
+
+```bash
+just bootstrap   # installs pinned toolchain, WASM target, verifies cargo
+just ci          # runs the full local CI equivalent to confirm everything works
+```
+
+**What `just bootstrap` does:**
+
+| Step | Action | Idempotent? |
+|------|--------|-------------|
+| 1 | Verifies `rustup` is installed and reachable | — (fails fast if missing) |
+| 2 | Installs / updates pinned toolchain `1.94.1` with `rustfmt` and `clippy` components | ✓ |
+| 3 | Adds `wasm32-unknown-unknown` cross-compilation target | ✓ |
+| 4 | Verifies `cargo` is on `PATH` | — (fails fast if missing) |
+
+**Pinned toolchain:** the `channel = "1.94.1"` entry in `rust-toolchain.toml`
+ensures every `cargo` command in the repository uses the same compiler version
+as CI. You do not need to set this manually — `rustup` reads the file
+automatically.
+
+**Session safety:** `just bootstrap` is safe to re-run after a fresh terminal,
+after `rustup update`, or after a CI toolchain bump. It only performs work when
+something is actually missing or outdated.
+
+**Prerequisites** (must be installed manually — not handled by `just bootstrap`):
+
+- `rustup` — https://rustup.rs
+- `just` — `brew install just` · `cargo install just` · https://just.systems
 
 ---
 
