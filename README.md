@@ -93,6 +93,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup instructions.
 
 ## Security & Supply Chain
 
+- **[WASM Binary Reproducibility Policy](docs/WASM_REPRODUCIBILITY_POLICY.md)** — Build input recording, artifact checksum provenance, and one-step maintainer verification for release WASM binaries.
 - **[Release Artifact Provenance Policy](docs/RELEASE_PROVENANCE_POLICY.md)** — Guidelines for WASM output checksums and snapshot check-ins.
 - **[Release Summary Format](docs/RELEASE_SUMMARY_FORMAT.md)** — Structured ship-review note format for maintainer release triage. Generate one with `just release-summary` (or `just release-summary <version>`).
 - **Dependency auditing:** `cargo audit` runs on CI for every push
