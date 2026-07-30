@@ -7998,7 +7998,10 @@ fn test_get_public_api_is_deterministic() {
 
 #[test]
 fn test_get_public_api_requires_initialization() {    let env = Env::default();
-    env.mock_all_auths();
+#[test]
+#[should_panic]
+fn test_get_public_api_requires_initialization() {
+    let env = Env::default();    env.mock_all_auths();
     let cid = env.register_contract(None, SLACalculatorContract);
     let client = SLACalculatorContractClient::new(&env, &cid);
     
@@ -8365,4 +8368,7 @@ fn test_227_error_classification_count_matches_enum() {
         client.get_public_api();
     }));
     assert!(result.is_err(), "get_public_api should fail before initialization");
+}
+    // Without initialization, get_public_api should panic with NotInitialized
+    client.get_public_api();
 }
