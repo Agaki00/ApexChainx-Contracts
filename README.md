@@ -98,3 +98,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup instructions.
 - **Dependency auditing:** `cargo audit` runs on CI for every push
 - **WASM integrity:** Release artifacts include SHA-256 manifests
 - **Reproducible builds:** Local builds can be verified against CI-generated manifests
+
+### Test Vector Artifacts for Backend Parity
+For a full map of this repo's snapshot/fixture directories, their lifecycle, and
+update workflow, see [docs/test-fixtures-guide.md](docs/test-fixtures-guide.md).
