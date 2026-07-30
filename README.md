@@ -166,6 +166,11 @@ description of every `just` recipe.
 - **[Event Topic Compatibility](docs/EVENT_TOPIC_COMPATIBILITY.md)** — Event topic compatibility and versioning policies.
 - **[Contract API Compatibility](docs/CONTRACT_API_COMPATIBILITY.md)** — API compatibility assertions for backend integration.
 
+## Operations & Reliability
+
+- **[Migration State Consumption Guide](docs/MIGRATION_STATE_CONSUMPTION.md)** — How `get_migration_state()` should be consumed by backend services and operator tooling for safe contract upgrades, monitoring, and deployment pipelines.
+- **[SLAError Failure Taxonomy](docs/FAILURE_TAXONOMY.md)** — Formal failure taxonomy for every `SLAError` code, including categories, severity, consumer impact, and recovery strategies.
+
 ## Security & Supply Chain
 
 - **[WASM Binary Reproducibility Policy](docs/WASM_REPRODUCIBILITY_POLICY.md)** — Build input recording, artifact checksum provenance, and one-step maintainer verification for release WASM binaries.
