@@ -19,6 +19,7 @@ expertise help make this project better for everyone in the Stellar ecosystem.
 - [Reporting Bugs](#reporting-bugs)
 - [Suggesting Features](#suggesting-features)
 - [Getting Help](#getting-help)
+- [Repository Policies & Checklists](#repository-policies--checklists)
 
 ---
 
@@ -454,6 +455,19 @@ pytest --cov=app --cov-report=html
 - ❌ Never commit API keys, private keys, or passwords
 - ❌ Never trust user input without validation
 - ❌ Never use unsafe code in smart contracts
+
+---
+
+## 📋 Repository Policies & Checklists
+
+In addition to the inline checklists below, this repository maintains several
+standalone policy documents and review templates:
+
+| Document | Purpose | Audience |
+|----------|---------|----------|
+| [docs/PUBLIC_FUNCTION_DOC_POLICY.md](docs/PUBLIC_FUNCTION_DOC_POLICY.md) (SC-102) | Mandatory doc comments on all public items | All contributors |
+| [docs/UPGRADE_REVIEW_CHECKLIST.md](docs/UPGRADE_REVIEW_CHECKLIST.md) (SC-103) | Admin-facing upgrade proposal review | Contract admins, multisig signers |
+| [docs/SECURITY_REVIEW_TEMPLATE.md](docs/SECURITY_REVIEW_TEMPLATE.md) (SC-104) | Security review for new contract modules | Developers & security reviewers |
 
 ## 🐛 Reporting Bugs
 
