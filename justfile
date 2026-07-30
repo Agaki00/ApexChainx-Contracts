@@ -37,6 +37,12 @@ test:
 fuzz:
     cd {{crate}} && cargo test --lib fuzz_tests::
 
+# Run the parity checker against canonical golden vectors.  [CI: parity-check]
+# Fails if any compute_result output diverges from the locked-in baseline.
+# See apexchainx_calculator/test_snapshots/tests/parity_baseline.json.
+parity-check:
+    cd {{crate}} && cargo test --lib parity_tests::
+
 # ---------------------------------------------------------------- lint ------
 
 # Format the crate in place.
@@ -105,5 +111,5 @@ clean:
     cd {{crate}} && cargo clean
 
 # Everything CI gates on, in CI's order. Run before opening a PR.
-ci: fmt-check lint check no-std test fuzz wasm
+ci: fmt-check lint check no-std test fuzz parity-check wasm
     @echo "✓ local CI equivalent passed"
