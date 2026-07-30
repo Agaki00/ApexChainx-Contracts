@@ -207,7 +207,16 @@ hash-verify: wasm-release
     else
         shasum -a 256 -c "$hash_file"
     fi
+# ------------------------------------------------------- dependency-hygiene -----
 
+# Check for unused dependencies with cargo-machete.              [CI: Unused dependency gate]
+machete:
+    cargo install cargo-machete --locked 2>/dev/null; cd {{crate}} && cargo machete
+
+# Check for unused dependencies with cargo-udeps.                [CI: Unused dependency gate]
+# Requires nightly Rust — install with: rustup toolchain install nightly
+udeps:
+    cargo install cargo-udeps --locked 2>/dev/null; cd {{crate}} && cargo +nightly udeps --all-targets
 # --------------------------------------------------------------- tooling -----
 
 # Generate a ship-review note from CHANGELOG.md.
@@ -224,4 +233,4 @@ clean:
 
 # Everything CI gates on, in CI's order. Run before opening a PR.
 ci: fmt-check lint check no-std test fuzz parity-check wasm
-    @echo "✓ local CI equivalent passed"
+ci: fmt-check lint check no-std machete udeps test fuzz wasm    @echo "✓ local CI equivalent passed"
