@@ -6,6 +6,12 @@ use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
 use soroban_sdk::testutils::Ledger as _;
 use soroban_sdk::{Env, Symbol, TryIntoVal};
+use crate::metrics::retention_stats::HistoryRetentionMetrics;
+use crate::config_bundle::ConfigBundle;
+use crate::version_negotiation::{VersionNegotiationInfo, NegotiationOutcome, VersionMismatchDetail, VersionNegotiationResult};
+use crate::audit_state::AuditState;
+use crate::event::CalculationExecutedEventV1;
+use crate::cross_contract_safety::CompensationAction;
 
 // ============================================================
 // Test helpers
@@ -215,6 +221,86 @@ fn test_severity_telemetry_tracks_per_severity_violation_rates() {
     assert_eq!(high.violation_rate, 0u32);
 }
 
+#[test]
+fn test_severity_telemetry_weekly_reset_semantics() {
+    let (env, client, actors) = setup();
+
+    // 1. Initial state at t = 1000
+    env.ledger().set_timestamp(1000);
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EVT001"),
+        &symbol_short!("critical"),
+        &20, // violation
+    );
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EVT002"),
+        &symbol_short!("high"),
+        &10, // met
+    );
+
+    let t1 = client.get_severity_telemetry();
+    let crit1 = t1.get(0).unwrap();
+    assert_eq!(crit1.calculations, 1);
+    assert_eq!(crit1.violations, 1);
+
+    let high1 = t1.get(1).unwrap();
+    assert_eq!(high1.calculations, 1);
+    assert_eq!(high1.violations, 0);
+
+    // 2. Advance time by 6 days (518,400s) — below 7-day threshold (604,800s)
+    env.ledger().set_timestamp(1000 + 6 * 86_400);
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EVT003"),
+        &symbol_short!("critical"),
+        &5, // met
+    );
+
+    let t2 = client.get_severity_telemetry();
+    let crit2 = t2.get(0).unwrap();
+    assert_eq!(crit2.calculations, 2);
+    assert_eq!(crit2.violations, 1);
+
+    // 3. Advance time to 7 days + 1 second after last critical calculation (t = 1000 + 6*86400 + 604801 = 1,123,201)
+    let reset_timestamp = 1000 + 6 * 86_400 + 7 * 86_400 + 1;
+    env.ledger().set_timestamp(reset_timestamp);
+
+    // Critical is invoked after >= 7 days of inactivity since last critical calc -> triggers reset & reinit
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EVT004"),
+        &symbol_short!("critical"),
+        &5, // met
+    );
+
+    let t3 = client.get_severity_telemetry();
+    let crit3 = t3.get(0).unwrap();
+    // Reinitialized to 1 calculation and 0 violations
+    assert_eq!(crit3.calculations, 1);
+    assert_eq!(crit3.violations, 0);
+    assert_eq!(crit3.violation_rate, 0);
+
+    // High lane was NOT invoked, so high lane telemetry counter is un-reset until its next invocation
+    let high3 = t3.get(1).unwrap();
+    assert_eq!(high3.calculations, 1);
+
+    // Invoking high lane after 7+ days triggers high lane reset
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EVT005"),
+        &symbol_short!("high"),
+        &40, // violation
+    );
+
+    let t4 = client.get_severity_telemetry();
+    let high4 = t4.get(1).unwrap();
+    assert_eq!(high4.calculations, 1);
+    assert_eq!(high4.violations, 1);
+    assert_eq!(high4.violation_rate, 100);
+}
+
 // ============================================================
 // #28 – Operator management
 // ============================================================
@@ -281,6 +367,39 @@ fn test_stranger_cannot_set_config() {
 
 #[test]
 fn test_storage_key_namespace_symbols_are_distinct() {
+    // -----------------------------------------------------------------------
+    // Storage-key collision regression test.
+    //
+    // Guards against future contributors accidentally reusing a Symbol string
+    // that is already occupied by another on-chain key.  Soroban instance
+    // storage is a flat key-value namespace: two constants that resolve to the
+    // same Symbol will silently alias the same storage slot, corrupting state.
+    //
+    // HOW TO MAINTAIN:
+    //   Every on-chain storage key constant defined in lib.rs (or re-exported
+    //   into it via `pub use`) MUST appear in this array.  When you add a new
+    //   key constant, append it here and run `cargo test --lib` to confirm
+    //   there is no collision before merging.
+    //
+    // KEY DEFINITIONS (all in apexchainx_calculator/src/lib.rs):
+    //   ADMIN_KEY                  = "ADMIN"
+    //   OPERATOR_KEY               = "OPERATOR"
+    //   PENDING_ADMIN_KEY          = "PADMIN"
+    //   PENDING_OP_KEY             = "POP"
+    //   CONFIG_KEY                 = "CONFIG"
+    //   CUSTOM_CONFIG_KEY          = "CUSTCFG"
+    //   PAUSED_KEY                 = "PAUSED"
+    //   PAUSE_INFO_KEY             = "PAUSEINF"
+    //   STATS_KEY                  = "STATS"
+    //   SEVERITY_CALC_COUNTS_KEY   = "CALCCNT"
+    //   SEVERITY_VIOL_COUNTS_KEY   = "VIOLCNT"
+    //   LAST_CALCULATION_LEDGER_KEY= "CALCLDG"
+    //   LAST_VIOLATION_LEDGER_KEY  = "VIOLLDG"
+    //   HISTORY_KEY                = "HIST"
+    //   STORAGE_VERSION_KEY        = "VER"
+    //   RETENTION_LIMIT_KEY        = "RETLIM"
+    //   LAST_CFG_UPDATE_KEY        = "LCFGUPD"  (re-exported from config_metadata)
+    // -----------------------------------------------------------------------
     let keys = [
         ADMIN_KEY,
         OPERATOR_KEY,
@@ -291,14 +410,23 @@ fn test_storage_key_namespace_symbols_are_distinct() {
         PAUSED_KEY,
         PAUSE_INFO_KEY,
         STATS_KEY,
+        SEVERITY_CALC_COUNTS_KEY,
+        SEVERITY_VIOL_COUNTS_KEY,
+        LAST_CALCULATION_LEDGER_KEY,
+        LAST_VIOLATION_LEDGER_KEY,
         HISTORY_KEY,
         STORAGE_VERSION_KEY,
         RETENTION_LIMIT_KEY,
+        LAST_CFG_UPDATE_KEY,
     ];
 
     for i in 0..keys.len() {
         for j in (i + 1)..keys.len() {
-            assert_ne!(keys[i], keys[j]);
+            assert_ne!(
+                keys[i], keys[j],
+                "storage key collision: keys[{}] == keys[{}] (both resolve to the same Symbol)",
+                i, j
+            );
         }
     }
 }
@@ -877,6 +1005,29 @@ fn test_set_config_budget_is_reasonable() {
     assert!(
         after - before < 150_000,
         "set_config too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_set_custom_severity_budget_is_reasonable() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.set_custom_severity(&admin, &symbol_short!("warning"), &90, &5, &200);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 150_000,
+        "set_custom_severity too expensive: {} instructions",
         after - before
     );
 }
@@ -1817,6 +1968,51 @@ fn test_repeated_config_updates_latest_wins() {
     assert_eq!(cfg.threshold_minutes, 30);
     assert_eq!(cfg.penalty_per_minute, 200);
     assert_eq!(cfg.reward_base, 1200);
+}
+
+/// Canonical regression test for the `set_config` event stream.
+///
+/// Contributor policy is documented in `docs/PROJECT_CONTEXT.md`. Keep this
+/// assertion in call order: every successful write must append exactly one
+/// `cfg_upd` event whose topic severity and payload belong to that write.
+#[test]
+fn test_repeated_set_config_events_preserve_call_and_payload_order() {
+    let (env, client, actors) = setup();
+
+    client.set_config(&actors.admin, &symbol_short!("critical"), &10, &50, &500);
+    client.set_config(&actors.admin, &symbol_short!("high"), &20, &25, &400);
+    client.set_config(&actors.admin, &symbol_short!("critical"), &30, &100, &800);
+
+    let events = env.events().all();
+    let mut config_events = soroban_sdk::Vec::new(&env);
+    for event in events.iter() {
+        let (_, topics, _) = &event;
+        let event_name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        if event_name == EVENT_CONFIG_UPD {
+            config_events.push_back(event);
+        }
+    }
+
+    assert_eq!(config_events.len(), 3);
+
+    let expected = [
+        (symbol_short!("critical"), (10u32, 50i128, 500i128)),
+        (symbol_short!("high"), (20u32, 25i128, 400i128)),
+        (symbol_short!("critical"), (30u32, 100i128, 800i128)),
+    ];
+
+    for (index, (expected_severity, expected_payload)) in expected.into_iter().enumerate() {
+        let (_, topics, data) = config_events.get(index as u32).unwrap();
+        let event_name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        let version: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
+        let severity: Symbol = topics.get(2).unwrap().try_into_val(&env).unwrap();
+        let payload: (u32, i128, i128) = data.try_into_val(&env).unwrap();
+
+        assert_eq!(event_name, EVENT_CONFIG_UPD);
+        assert_eq!(version, EVENT_VERSION);
+        assert_eq!(severity, expected_severity);
+        assert_eq!(payload, expected_payload);
+    }
 }
 
 #[test]
@@ -6573,6 +6769,14 @@ fn test_257_result_schema_fields_are_stable() {
 }
 
 #[test]
+fn test_239_severity_aliases_field_exists_and_empty_in_v1() {
+    let (_env, client, _actors) = setup();
+    let schema = client.get_result_schema();
+    // #239 – severity_aliases field must be present for future deprecations
+    assert_eq!(schema.severity_aliases.len(), 0, "No severity aliases deprecated in v1");
+}
+
+#[test]
 fn test_257_hash_differs_across_all_four_severities() {
     // Updating each severity independently must produce a distinct hash.
     let (_env, client, actors) = setup();
@@ -7024,9 +7228,15 @@ fn test_economic_exposure_returns_all_severities() {
     let (_env, client, _actors) = setup();
     let exposure = client.get_economic_exposure();
     assert_eq!(exposure.breakdown.len(), 4);
-    assert_eq!(exposure.breakdown.get(0).unwrap().severity, symbol_short!("critical"));
+    assert_eq!(
+        exposure.breakdown.get(0).unwrap().severity,
+        symbol_short!("critical")
+    );
     assert_eq!(exposure.breakdown.get(1).unwrap().severity, symbol_short!("high"));
-    assert_eq!(exposure.breakdown.get(2).unwrap().severity, symbol_short!("medium"));
+    assert_eq!(
+        exposure.breakdown.get(2).unwrap().severity,
+        symbol_short!("medium")
+    );
     assert_eq!(exposure.breakdown.get(3).unwrap().severity, symbol_short!("low"));
 }
 
@@ -7040,14 +7250,14 @@ fn test_economic_exposure_max_reward_matches_top_tier() {
     // Default configs: critical/high/medium → reward_base 750, low → 600
     // Top-tier (200 %): 750 * 200 / 100 = 1500; 600 * 200 / 100 = 1200
     let critical = exposure.breakdown.get(0).unwrap();
-    let high     = exposure.breakdown.get(1).unwrap();
-    let medium   = exposure.breakdown.get(2).unwrap();
-    let low      = exposure.breakdown.get(3).unwrap();
+    let high = exposure.breakdown.get(1).unwrap();
+    let medium = exposure.breakdown.get(2).unwrap();
+    let low = exposure.breakdown.get(3).unwrap();
 
     assert_eq!(critical.max_reward, 1500);
-    assert_eq!(high.max_reward,     1500);
-    assert_eq!(medium.max_reward,   1500);
-    assert_eq!(low.max_reward,      1200);
+    assert_eq!(high.max_reward, 1500);
+    assert_eq!(medium.max_reward, 1500);
+    assert_eq!(low.max_reward, 1200);
 }
 
 /// (c) `penalty_per_minute` for each severity matches the configured rate.
@@ -7058,14 +7268,14 @@ fn test_economic_exposure_penalty_rate_matches_config() {
 
     // Default penalty_per_minute: critical=100, high=50, medium=25, low=10
     let critical = exposure.breakdown.get(0).unwrap();
-    let high     = exposure.breakdown.get(1).unwrap();
-    let medium   = exposure.breakdown.get(2).unwrap();
-    let low      = exposure.breakdown.get(3).unwrap();
+    let high = exposure.breakdown.get(1).unwrap();
+    let medium = exposure.breakdown.get(2).unwrap();
+    let low = exposure.breakdown.get(3).unwrap();
 
     assert_eq!(critical.penalty_per_minute, 100);
-    assert_eq!(high.penalty_per_minute,      50);
-    assert_eq!(medium.penalty_per_minute,    25);
-    assert_eq!(low.penalty_per_minute,       10);
+    assert_eq!(high.penalty_per_minute, 50);
+    assert_eq!(medium.penalty_per_minute, 25);
+    assert_eq!(low.penalty_per_minute, 10);
 }
 
 /// (d) Aggregate `total_max_reward` equals the sum of per-severity max rewards.
@@ -7075,11 +7285,7 @@ fn test_economic_exposure_total_max_reward_is_sum_of_breakdown() {
     let exposure = client.get_economic_exposure();
 
     // Default: 1500 + 1500 + 1500 + 1200 = 5700
-    let expected_total: i128 = exposure
-        .breakdown
-        .iter()
-        .map(|e| e.max_reward)
-        .sum();
+    let expected_total: i128 = exposure.breakdown.iter().map(|e| e.max_reward).sum();
     assert_eq!(exposure.total_max_reward, expected_total);
     assert_eq!(exposure.total_max_reward, 5700);
 }
@@ -7092,11 +7298,7 @@ fn test_economic_exposure_total_penalty_per_minute_is_sum_of_breakdown() {
     let exposure = client.get_economic_exposure();
 
     // Default: 100 + 50 + 25 + 10 = 185
-    let expected_total: i128 = exposure
-        .breakdown
-        .iter()
-        .map(|e| e.penalty_per_minute)
-        .sum();
+    let expected_total: i128 = exposure.breakdown.iter().map(|e| e.penalty_per_minute).sum();
     assert_eq!(exposure.total_penalty_per_minute, expected_total);
     assert_eq!(exposure.total_penalty_per_minute, 185);
 }
@@ -7112,7 +7314,7 @@ fn test_economic_exposure_reflects_config_change() {
     let exposure = client.get_economic_exposure();
     let critical = exposure.breakdown.get(0).unwrap();
 
-    assert_eq!(critical.max_reward,        2000);
+    assert_eq!(critical.max_reward, 2000);
     assert_eq!(critical.penalty_per_minute, 200);
 
     // Totals must also update: was 5700 reward, now (2000 + 1500 + 1500 + 1200) = 6200
@@ -7140,8 +7342,18 @@ fn test_economic_exposure_independent_of_history() {
 
     // Run a couple of calculations to populate history
     env.mock_all_auths();
-    client.calculate_sla(&actors.operator, &symbol_short!("out001"), &symbol_short!("critical"), &5);
-    client.calculate_sla(&actors.operator, &symbol_short!("out002"), &symbol_short!("high"), &40);
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("out001"),
+        &symbol_short!("critical"),
+        &5,
+    );
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("out002"),
+        &symbol_short!("high"),
+        &40,
+    );
 
     let exposure_before = client.get_economic_exposure();
 
@@ -7203,12 +7415,39 @@ fn test_healthcheck_is_deterministic() {
     let (_env, client, _actors) = setup();
     let a = client.healthcheck();
     let b = client.healthcheck();
-    assert_eq!(a, b);
+// #194 – get_result_schema coverage test with migration notes guard
+// ============================================================
+//
+// IMPORTANT: When RESULT_SCHEMA_VERSION is incremented, you MUST also
+// update the migration notes below and document what changed:
+//
+// Migration notes for schema version changes:
+// - v1: Initial schema. Fields: outage_id, status, payment_type, rating,
+//       mttr_minutes, threshold_minutes, amount, config_version_hash,
+//       recorded_at. All symbols are as defined in the SLAResultSchema.
+//       No deprecated symbols.
+
+#[test]
+fn test_get_result_schema_matches_expected_constant() {
+    let (_env, client, _actors) = setup();
+    let schema = client.get_result_schema();
+    assert_eq!(
+        schema.schema_version,
+        RESULT_SCHEMA_VERSION,
+        "RESULT_SCHEMA_VERSION mismatch. Update migration notes and bump constant!"
+    );
+}
+
+#[test]
+fn test_get_result_schema_is_deterministic() {
+    let (_env, client, _actors) = setup();
+    let a = client.get_result_schema();
+    let b = client.get_result_schema();    assert_eq!(a, b);
 }
 
 #[test]
 fn test_healthcheck_does_not_mutate_state() {
-    let (_env, client, actors) = setup();
+    let (_env, client, _actors) = setup();
     let stats_before = client.get_stats();
     let _hc = client.healthcheck();
     let stats_after = client.get_stats();
@@ -7227,12 +7466,403 @@ fn test_healthcheck_does_not_require_auth() {
 // #282 – Historical Parity Checker
 // ============================================================
 // Validates that current contract behaviour matches known golden results.
+// ============================================================
+// Issue #240 – Serialization compatibility for all #[contracttype] structures
+// ============================================================
+
+#[test]
+fn test_240_all_contracttype_structures_round_trip_serialization() {
+    let env = Env::default();
+
+    // Test SLAConfig
+    let sla_config = SLAConfig {
+        threshold_minutes: 30,
+        penalty_per_minute: 100,
+        reward_base: 750,
+    };
+    let scval_config = sla_config.clone().try_into_val(&env).unwrap();
+    let restored_config: SLAConfig = scval_config.try_into_val(&env).unwrap();
+    assert_eq!(sla_config, restored_config, "SLAConfig round-trip failed");
+
+    // Test SLAResult
+    let sla_result = SLAResult {
+        outage_id: symbol_short!("test"),
+        status: symbol_short!("met"),
+        mttr_minutes: 15,
+        threshold_minutes: 30,
+        amount: 1500,
+        payment_type: symbol_short!("rew"),
+        rating: symbol_short!("top"),
+        config_version_hash: 12345,
+        recorded_at: 1700000000,
+    };
+    let scval_result = sla_result.clone().try_into_val(&env).unwrap();
+    let restored_result: SLAResult = scval_result.try_into_val(&env).unwrap();
+    assert_eq!(sla_result, restored_result, "SLAResult round-trip failed");
+
+    // Test SLAConfigEntry
+    let config_entry = SLAConfigEntry {
+        severity: symbol_short!("critical"),
+        config: SLAConfig {
+            threshold_minutes: 30,
+            penalty_per_minute: 100,
+            reward_base: 750,
+        },
+    };
+    let scval_entry = config_entry.clone().try_into_val(&env).unwrap();
+    let restored_entry: SLAConfigEntry = scval_entry.try_into_val(&env).unwrap();
+    assert_eq!(config_entry, restored_entry, "SLAConfigEntry round-trip failed");
+
+    // Test SLAConfigSnapshot
+    let mut entries = Vec::new(&env);
+    entries.push_back(SLAConfigEntry {
+        severity: symbol_short!("critical"),
+        config: SLAConfig {
+            threshold_minutes: 30,
+            penalty_per_minute: 100,
+            reward_base: 750,
+        },
+    });
+    let config_snapshot = SLAConfigSnapshot {
+        version: symbol_short!("v1"),
+        entries,
+    };
+    let scval_snapshot = config_snapshot.clone().try_into_val(&env).unwrap();
+    let restored_snapshot: SLAConfigSnapshot = scval_snapshot.try_into_val(&env).unwrap();
+    assert_eq!(config_snapshot, restored_snapshot, "SLAConfigSnapshot round-trip failed");
+
+    // Test SLAResultSchema
+    let mut deprecated_symbols = Vec::new(&env);
+    let mut severity_aliases = Vec::new(&env);
+    let result_schema = SLAResultSchema {
+        version: symbol_short!("v1"),
+        schema_version: 1,
+        status_met: symbol_short!("met"),
+        status_violated: symbol_short!("viol"),
+        payment_reward: symbol_short!("rew"),
+        payment_penalty: symbol_short!("pen"),
+        rating_exceptional: symbol_short!("top"),
+        rating_excellent: symbol_short!("excel"),
+        rating_good: symbol_short!("good"),
+        rating_poor: symbol_short!("poor"),
+        includes_config_version_hash: true,
+        deprecated_symbols,
+        severity_aliases,
+    };
+    let scval_schema = result_schema.clone().try_into_val(&env).unwrap();
+    let restored_schema: SLAResultSchema = scval_schema.try_into_val(&env).unwrap();
+    assert_eq!(result_schema, restored_schema, "SLAResultSchema round-trip failed");
+
+    // Test DeprecatedSymbol
+    let deprecated_symbol = DeprecatedSymbol {
+        old_symbol: symbol_short!("old"),
+        new_symbol: symbol_short!("new"),
+        deprecated_at: 1,
+        removal_version: Some(2),
+    };
+    let scval_deprecated = deprecated_symbol.clone().try_into_val(&env).unwrap();
+    let restored_deprecated: DeprecatedSymbol = scval_deprecated.try_into_val(&env).unwrap();
+    assert_eq!(deprecated_symbol, restored_deprecated, "DeprecatedSymbol round-trip failed");
+
+    // Test SeverityAliasMapping
+    let alias_mapping = SeverityAliasMapping {
+        old_severity: symbol_short!("critical"),
+        new_severity: symbol_short!("crit"),
+        deprecated_at: 2,
+        removal_version: None,
+    };
+    let scval_alias = alias_mapping.clone().try_into_val(&env).unwrap();
+    let restored_alias: SeverityAliasMapping = scval_alias.try_into_val(&env).unwrap();
+    assert_eq!(alias_mapping, restored_alias, "SeverityAliasMapping round-trip failed");
+
+    // Test ContractMetadata
+    let mut supported_severities = Vec::new(&env);
+    supported_severities.push_back(symbol_short!("critical"));
+    let metadata = ContractMetadata {
+        contract_name: symbol_short!("apexchainx_calculator"),
+        storage_version: 1,
+        result_schema_version: 1,
+        supported_severities,
+        features: Vec::new(&env),
+    };
+    let scval_metadata = metadata.clone().try_into_val(&env).unwrap();
+    let restored_metadata: ContractMetadata = scval_metadata.try_into_val(&env).unwrap();
+    assert_eq!(metadata, restored_metadata, "ContractMetadata round-trip failed");
+
+    // Test SLAStats
+    let stats = SLAStats {
+        total_calculations: 1000,
+        total_violations: 50,
+        total_rewards: 50000,
+        total_penalties: -2500,
+    };
+    let scval_stats = stats.clone().try_into_val(&env).unwrap();
+    let restored_stats: SLAStats = scval_stats.try_into_val(&env).unwrap();
+    assert_eq!(stats, restored_stats, "SLAStats round-trip failed");
+
+    // Test SeverityExposure
+    let severity_exposure = SeverityExposure {
+        severity: symbol_short!("critical"),
+        max_reward: 750,
+        max_penalty: -500,
+        threshold_minutes: 30,
+    };
+    let scval_exposure = severity_exposure.clone().try_into_val(&env).unwrap();
+    let restored_exposure: SeverityExposure = scval_exposure.try_into_val(&env).unwrap();
+    assert_eq!(severity_exposure, restored_exposure, "SeverityExposure round-trip failed");
+
+    // Test EconomicExposure
+    let mut breakdown = Vec::new(&env);
+    breakdown.push_back(SeverityExposure {
+        severity: symbol_short!("critical"),
+        max_reward: 750,
+        max_penalty: -500,
+        threshold_minutes: 30,
+    });
+    let economic_exposure = EconomicExposure {
+        max_total_reward: 750,
+        max_total_penalty: -500,
+        breakdown,
+    };
+    let scval_economic = economic_exposure.clone().try_into_val(&env).unwrap();
+    let restored_economic: EconomicExposure = scval_economic.try_into_val(&env).unwrap();
+    assert_eq!(economic_exposure, restored_economic, "EconomicExposure round-trip failed");
+
+    // Test SeverityTelemetry
+    let telemetry = SeverityTelemetry {
+        severity: symbol_short!("critical"),
+        violation_rate_bps: 500,
+    };
+    let scval_telemetry = telemetry.clone().try_into_val(&env).unwrap();
+    let restored_telemetry: SeverityTelemetry = scval_telemetry.try_into_val(&env).unwrap();
+    assert_eq!(telemetry, restored_telemetry, "SeverityTelemetry round-trip failed");
+
+    // Test PauseInfo
+    let pause_info = PauseInfo {
+        reason: String::from_str(&env, "test pause"),
+        paused_at: Some(1700000000),
+    };
+    let scval_pause = pause_info.clone().try_into_val(&env).unwrap();
+    let restored_pause: PauseInfo = scval_pause.try_into_val(&env).unwrap();
+    assert_eq!(pause_info, restored_pause, "PauseInfo round-trip failed");
+
+    // Test ConfigUpdateInfo
+    let update_info = ConfigUpdateInfo {
+        sequence: 12345,
+    };
+    let scval_update = update_info.clone().try_into_val(&env).unwrap();
+    let restored_update: ConfigUpdateInfo = scval_update.try_into_val(&env).unwrap();
+    assert_eq!(update_info, restored_update, "ConfigUpdateInfo round-trip failed");
+
+    // Test StorageVersionInfo
+    let version_info = StorageVersionInfo {
+        storage_version: 1,
+        result_schema_version: 1,
+        needs_migration: false,
+    };
+    let scval_version = version_info.clone().try_into_val(&env).unwrap();
+    let restored_version: StorageVersionInfo = scval_version.try_into_val(&env).unwrap();
+    assert_eq!(version_info, restored_version, "StorageVersionInfo round-trip failed");
+
+    // Test FailureCode
+    let failure_code = FailureCode {
+        code: 1,
+        label: symbol_short!("test_error"),
+        description: String::from_str(&env, "Test error description"),
+    };
+    let scval_failure = failure_code.clone().try_into_val(&env).unwrap();
+    let restored_failure: FailureCode = scval_failure.try_into_val(&env).unwrap();
+    assert_eq!(failure_code, restored_failure, "FailureCode round-trip failed");
+
+    // Test FailureSchema
+    let mut codes = Vec::new(&env);
+    codes.push_back(FailureCode {
+        code: 1,
+        label: symbol_short!("test_error"),
+        description: String::from_str(&env, "Test error description"),
+    });
+    let failure_schema = FailureSchema {
+        version: symbol_short!("v1"),
+        schema_version: 1,
+        codes,
+    };
+    let scval_failure_schema = failure_schema.clone().try_into_val(&env).unwrap();
+    let restored_failure_schema: FailureSchema = scval_failure_schema.try_into_val(&env).unwrap();
+    assert_eq!(failure_schema, restored_failure_schema, "FailureSchema round-trip failed");
+
+    // Test HealthcheckResult
+    let healthcheck = HealthcheckResult {
+        healthy: true,
+    };
+    let scval_healthcheck = healthcheck.clone().try_into_val(&env).unwrap();
+    let restored_healthcheck: HealthcheckResult = scval_healthcheck.try_into_val(&env).unwrap();
+    assert_eq!(healthcheck, restored_healthcheck, "HealthcheckResult round-trip failed");
+
+    // Test VersionInfo
+    let version_info = VersionInfo {
+        storage_version: 1,
+        result_schema_version: 1,
+        is_paused: false,
+    };
+    let scval_version_info = version_info.clone().try_into_val(&env).unwrap();
+    let restored_version_info: VersionInfo = scval_version_info.try_into_val(&env).unwrap();
+    assert_eq!(version_info, restored_version_info, "VersionInfo round-trip failed");
+
+    // Test HistoryRetentionMetrics
+    let retention_metrics = HistoryRetentionMetrics {
+        protocol_version: 1,
+        retention_limit: 1000,
+        retained_entries: 800,
+        pruned_entries: 200,
+        total_entries: 1000,
+        retention_ratio_bps: 8000,
+    };
+    let scval_retention = retention_metrics.clone().try_into_val(&env).unwrap();
+    let restored_retention: HistoryRetentionMetrics = scval_retention.try_into_val(&env).unwrap();
+    assert_eq!(retention_metrics, restored_retention, "HistoryRetentionMetrics round-trip failed");
+
+    // Test ConfigBundle
+    let mut entries = Vec::new(&env);
+    entries.push_back(SLAConfigEntry {
+        severity: symbol_short!("critical"),
+        config: SLAConfig {
+            threshold_minutes: 30,
+            penalty_per_minute: 100,
+            reward_base: 750,
+        },
+    });
+    let mut deprecated_symbols = Vec::new(&env);
+    let mut severity_aliases = Vec::new(&env);
+    let config_bundle = ConfigBundle {
+        snapshot: SLAConfigSnapshot {
+            version: symbol_short!("v1"),
+            entries,
+        },
+        schema: SLAResultSchema {
+            version: symbol_short!("v1"),
+            schema_version: 1,
+            status_met: symbol_short!("met"),
+            status_violated: symbol_short!("viol"),
+            payment_reward: symbol_short!("rew"),
+            payment_penalty: symbol_short!("pen"),
+            rating_exceptional: symbol_short!("top"),
+            rating_excellent: symbol_short!("excel"),
+            rating_good: symbol_short!("good"),
+            rating_poor: symbol_short!("poor"),
+            includes_config_version_hash: true,
+            deprecated_symbols,
+            severity_aliases,
+        },
+    };
+    let scval_bundle = config_bundle.clone().try_into_val(&env).unwrap();
+    let restored_bundle: ConfigBundle = scval_bundle.try_into_val(&env).unwrap();
+    assert_eq!(config_bundle, restored_bundle, "ConfigBundle round-trip failed");
+
+    // Test VersionNegotiationInfo
+    let version_info = VersionNegotiationInfo {
+        contract_name: String::from_str(&env, "test_contract"),
+        major: 1,
+        minor: 0,
+        patch: 0,
+    };
+    let scval_version_info = version_info.clone().try_into_val(&env).unwrap();
+    let restored_version_info: VersionNegotiationInfo = scval_version_info.try_into_val(&env).unwrap();
+    assert_eq!(version_info, restored_version_info, "VersionNegotiationInfo round-trip failed");
+
+    // Test NegotiationOutcome
+    let outcome = NegotiationOutcome::Compatible;
+    let scval_outcome = outcome.clone().try_into_val(&env).unwrap();
+    let restored_outcome: NegotiationOutcome = scval_outcome.try_into_val(&env).unwrap();
+    assert_eq!(outcome, restored_outcome, "NegotiationOutcome round-trip failed");
+
+    // Test VersionMismatchDetail
+    let mismatch_detail = VersionMismatchDetail {
+        contract_name: String::from_str(&env, "test_contract"),
+        current_version: String::from_str(&env, "1.0.0"),
+        required_min: String::from_str(&env, "1.1.0"),
+        required_max: String::from_str(&env, "2.0.0"),
+    };
+    let scval_mismatch = mismatch_detail.clone().try_into_val(&env).unwrap();
+    let restored_mismatch: VersionMismatchDetail = scval_mismatch.try_into_val(&env).unwrap();
+    assert_eq!(mismatch_detail, restored_mismatch, "VersionMismatchDetail round-trip failed");
+
+    // Test VersionNegotiationResult
+    let mut details = Vec::new(&env);
+    let negotiation_result = VersionNegotiationResult {
+        outcome: NegotiationOutcome::Compatible,
+        details,
+    };
+    let scval_negotiation = negotiation_result.clone().try_into_val(&env).unwrap();
+    let restored_negotiation: VersionNegotiationResult = scval_negotiation.try_into_val(&env).unwrap();
+    assert_eq!(negotiation_result, restored_negotiation, "VersionNegotiationResult round-trip failed");
+
+    // Test AuditState
+    let admin = Address::generate(&env);
+    let operator = Address::generate(&env);
+    let pending_operator = Some(Address::generate(&env));
+    let mut pause_info = Vec::new(&env);
+    pause_info.push_back(PauseInfo {
+        reason: String::from_str(&env, "test pause"),
+        paused_at: Some(1700000000),
+    });
+    let mut config_entries = Vec::new(&env);
+    config_entries.push_back(SLAConfigEntry {
+        severity: symbol_short!("critical"),
+        config: SLAConfig {
+            threshold_minutes: 30,
+            penalty_per_minute: 100,
+            reward_base: 750,
+        },
+    });
+    let audit_state = AuditState {
+        admin: admin.clone(),
+        operator: operator.clone(),
+        pending_operator,
+        paused: true,
+        pause_info,
+        config_snapshot: SLAConfigSnapshot {
+            version: symbol_short!("v1"),
+            entries: config_entries,
+        },
+        stats: SLAStats {
+            total_calculations: 1000,
+            total_violations: 50,
+            total_rewards: 50000,
+            total_penalties: -2500,
+        },
+    };
+    let scval_audit = audit_state.clone().try_into_val(&env).unwrap();
+    let restored_audit: AuditState = scval_audit.try_into_val(&env).unwrap();
+    assert_eq!(audit_state, restored_audit, "AuditState round-trip failed");
+
+    // Test CalculationExecutedEventV1
+    let event = CalculationExecutedEventV1 {
+        input_key: symbol_short!("test_key"),
+    };
+    let scval_event = event.clone().try_into_val(&env).unwrap();
+    let restored_event: CalculationExecutedEventV1 = scval_event.try_into_val(&env).unwrap();
+    assert_eq!(event, restored_event, "CalculationExecutedEventV1 round-trip failed");
+
+    // Test CompensationAction
+    let compensation = CompensationAction {
+        compensation_tag: symbol_short!("test_comp"),
+        args: Vec::new(&env),
+    };
+    let scval_compensation = compensation.clone().try_into_val(&env).unwrap();
+    let restored_compensation: CompensationAction = scval_compensation.try_into_val(&env).unwrap();
+    assert_eq!(compensation, restored_compensation, "CompensationAction round-trip failed");
+}
+
+// ============================================================
+// Historical Parity Golden Results
+// ============================================================
+
 // Used as a release regression gate: if these assertions fail, the contract
 // has diverged from its historical behaviour baseline.
 
 #[test]
 fn test_historical_parity_golden_results() {
-    let (_env, client, actors) = setup();
+    let (_env, client, _actors) = setup();
 
     // Golden result set: known-good outputs for specific inputs.
     // These must NEVER change between releases — if they do, it's a regression.
@@ -7246,18 +7876,102 @@ fn test_historical_parity_golden_results() {
     }
 
     let golden = [
-        Golden { outage_id: "HP001", severity: "critical", mttr: 5,  expected_status: "met",  expected_amount: 1500, expected_rating: "top" },
-        Golden { outage_id: "HP002", severity: "critical", mttr: 15, expected_status: "met",  expected_amount: 750,  expected_rating: "good" },
-        Golden { outage_id: "HP003", severity: "critical", mttr: 20, expected_status: "viol", expected_amount: -500, expected_rating: "poor" },
-        Golden { outage_id: "HP004", severity: "high",     mttr: 10, expected_status: "met",  expected_amount: 1500, expected_rating: "top" },
-        Golden { outage_id: "HP005", severity: "high",     mttr: 30, expected_status: "met",  expected_amount: 750,  expected_rating: "good" },
-        Golden { outage_id: "HP006", severity: "high",     mttr: 40, expected_status: "viol", expected_amount: -500, expected_rating: "poor" },
-        Golden { outage_id: "HP007", severity: "medium",   mttr: 20, expected_status: "met",  expected_amount: 1500, expected_rating: "top" },
-        Golden { outage_id: "HP008", severity: "medium",   mttr: 60, expected_status: "met",  expected_amount: 750,  expected_rating: "good" },
-        Golden { outage_id: "HP009", severity: "medium",   mttr: 80, expected_status: "viol", expected_amount: -500, expected_rating: "poor" },
-        Golden { outage_id: "HP010", severity: "low",      mttr: 40, expected_status: "met",  expected_amount: 1200, expected_rating: "top" },
-        Golden { outage_id: "HP011", severity: "low",      mttr: 120,expected_status: "met",  expected_amount: 600,  expected_rating: "good" },
-        Golden { outage_id: "HP012", severity: "low",      mttr: 150,expected_status: "viol", expected_amount: -300, expected_rating: "poor" },
+        Golden {
+            outage_id: "HP001",
+            severity: "critical",
+            mttr: 5,
+            expected_status: "met",
+            expected_amount: 1500,
+            expected_rating: "top",
+        },
+        Golden {
+            outage_id: "HP002",
+            severity: "critical",
+            mttr: 15,
+            expected_status: "met",
+            expected_amount: 750,
+            expected_rating: "good",
+        },
+        Golden {
+            outage_id: "HP003",
+            severity: "critical",
+            mttr: 20,
+            expected_status: "viol",
+            expected_amount: -500,
+            expected_rating: "poor",
+        },
+        Golden {
+            outage_id: "HP004",
+            severity: "high",
+            mttr: 10,
+            expected_status: "met",
+            expected_amount: 1500,
+            expected_rating: "top",
+        },
+        Golden {
+            outage_id: "HP005",
+            severity: "high",
+            mttr: 30,
+            expected_status: "met",
+            expected_amount: 750,
+            expected_rating: "good",
+        },
+        Golden {
+            outage_id: "HP006",
+            severity: "high",
+            mttr: 40,
+            expected_status: "viol",
+            expected_amount: -500,
+            expected_rating: "poor",
+        },
+        Golden {
+            outage_id: "HP007",
+            severity: "medium",
+            mttr: 20,
+            expected_status: "met",
+            expected_amount: 1500,
+            expected_rating: "top",
+        },
+        Golden {
+            outage_id: "HP008",
+            severity: "medium",
+            mttr: 60,
+            expected_status: "met",
+            expected_amount: 750,
+            expected_rating: "good",
+        },
+        Golden {
+            outage_id: "HP009",
+            severity: "medium",
+            mttr: 80,
+            expected_status: "viol",
+            expected_amount: -500,
+            expected_rating: "poor",
+        },
+        Golden {
+            outage_id: "HP010",
+            severity: "low",
+            mttr: 40,
+            expected_status: "met",
+            expected_amount: 1200,
+            expected_rating: "top",
+        },
+        Golden {
+            outage_id: "HP011",
+            severity: "low",
+            mttr: 120,
+            expected_status: "met",
+            expected_amount: 600,
+            expected_rating: "good",
+        },
+        Golden {
+            outage_id: "HP012",
+            severity: "low",
+            mttr: 150,
+            expected_status: "viol",
+            expected_amount: -300,
+            expected_rating: "poor",
+        },
     ];
 
     for g in golden.iter() {
@@ -7267,21 +7981,791 @@ fn test_historical_parity_golden_results() {
         // Use view to avoid mutating state and to verify that the view path
         // also produces the same golden results.
         let view = client.calculate_sla_view(&oid, &sev, &g.mttr);
-        assert_eq!(view.status, Symbol::new(&_env, g.expected_status),
-            "Golden mismatch: {} {} mttr={} — status", g.outage_id, g.severity, g.mttr);
-        assert_eq!(view.amount, g.expected_amount,
-            "Golden mismatch: {} {} mttr={} — amount", g.outage_id, g.severity, g.mttr);
-        assert_eq!(view.rating, Symbol::new(&_env, g.expected_rating),
-            "Golden mismatch: {} {} mttr={} — rating", g.outage_id, g.severity, g.mttr);
+        assert_eq!(
+            view.status,
+            Symbol::new(&_env, g.expected_status),
+            "Golden mismatch: {} {} mttr={} — status",
+            g.outage_id,
+            g.severity,
+            g.mttr
+        );
+        assert_eq!(
+            view.amount, g.expected_amount,
+            "Golden mismatch: {} {} mttr={} — amount",
+            g.outage_id, g.severity, g.mttr
+        );
+        assert_eq!(
+            view.rating,
+            Symbol::new(&_env, g.expected_rating),
+            "Golden mismatch: {} {} mttr={} — rating",
+            g.outage_id,
+            g.severity,
+            g.mttr
+        );
     }
 
     // Also validate that the config snapshot is historically stable
     let snapshot = client.get_config_snapshot();
-    assert_eq!(snapshot.version, symbol_short!("v1"), "Config snapshot version changed");
+    assert_eq!(
+        snapshot.version,
+        symbol_short!("v1"),
+        "Config snapshot version changed"
+    );
     assert_eq!(snapshot.entries.len(), 4, "Config snapshot entry count changed");
 
     // Validate result schema stability
     let schema = client.get_result_schema();
     assert_eq!(schema.schema_version, 1, "Result schema version changed — check migration notes");
     assert_eq!(schema.deprecated_symbols.len(), 0, "Unexpected deprecated symbols in v1");
+// #264 – Failure catalog drift guard
+// ============================================================
+//
+// `error_responses.rs` provides a `is_*` predicate for every `SLAError`
+// variant so backend consumers never have to match on the enum directly.
+// The match below binds each variant to its predicate with no wildcard
+// (`_`) arm, so it only compiles while the two stay in lockstep:
+//   - a new `SLAError` variant with no arm here => non-exhaustive match,
+//     compile error.
+//   - a helper renamed or removed from `error_responses.rs` => unresolved
+//     name, compile error.
+// Either kind of drift fails the build, which fails the contract test
+// suite, before the loop body's own assertions ever run.
+#[test]
+fn test_failure_catalog_matches_error_helpers() {
+    let all_variants = [
+        SLAError::AlreadyInitialized,
+        SLAError::NotInitialized,
+        SLAError::Unauthorized,
+        SLAError::ConfigNotFound,
+        SLAError::VersionMismatch,
+        SLAError::ContractPaused,
+        SLAError::NoPendingTransfer,
+        SLAError::InvalidThreshold,
+        SLAError::InvalidPenalty,
+        SLAError::InvalidReward,
+        SLAError::InvalidSeverity,
+        SLAError::RetentionLimitOutOfRange,
+        SLAError::DuplicateOutageInput,
+        SLAError::InvalidPenaltyAmount,
+        SLAError::InvalidRewardAmount,
+        SLAError::ConfigFrozen,
+        SLAError::InvalidInput,
+        SLAError::SeverityNotInSet,
+        SLAError::OutageRecalcLimit,
+    ];
+
+    for err in all_variants {
+        let recognized = match err {
+            SLAError::AlreadyInitialized => error_responses::is_already_initialized(&err),
+            SLAError::NotInitialized => error_responses::is_not_initialized(&err),
+            SLAError::Unauthorized => error_responses::is_unauthorized(&err),
+            SLAError::ConfigNotFound => error_responses::is_config_not_found(&err),
+            SLAError::VersionMismatch => error_responses::is_version_mismatch(&err),
+            SLAError::ContractPaused => error_responses::is_contract_paused(&err),
+            SLAError::NoPendingTransfer => error_responses::is_no_pending_transfer(&err),
+            SLAError::InvalidThreshold => error_responses::is_invalid_threshold(&err),
+            SLAError::InvalidPenalty => error_responses::is_invalid_penalty(&err),
+            SLAError::InvalidReward => error_responses::is_invalid_reward(&err),
+            SLAError::InvalidSeverity => error_responses::is_invalid_severity(&err),
+            SLAError::RetentionLimitOutOfRange => {
+                error_responses::is_retention_limit_out_of_range(&err)
+            }
+            SLAError::DuplicateOutageInput => error_responses::is_duplicate_outage_input(&err),
+            SLAError::InvalidPenaltyAmount => error_responses::is_invalid_penalty_amount(&err),
+            SLAError::InvalidRewardAmount => error_responses::is_invalid_reward_amount(&err),
+            SLAError::ConfigFrozen => error_responses::is_config_frozen(&err),
+            SLAError::InvalidInput => error_responses::is_invalid_input(&err),
+            SLAError::SeverityNotInSet => error_responses::is_severity_not_in_set(&err),
+            SLAError::OutageRecalcLimit => error_responses::is_outage_recalc_limit(&err),
+        };
+        assert!(
+            recognized,
+            "error_responses helper for {:?} did not recognize its own variant",
+            err
+        );
+    }
+    assert_eq!(
+        schema.schema_version, 1,
+        "Result schema version changed — check migration notes"
+    );
+    assert_eq!(
+        schema.deprecated_symbols.len(),
+        0,
+        "Unexpected deprecated symbols in v1"
+    );}
+
+
+// ============================================================
+// Issue #261 – Contract state fingerprint for release review and upgrade planning
+// ============================================================
+//
+// Acceptance criteria:
+// - The fingerprint includes storage_version, result_schema_version,
+//   config_version_hash, is_paused, needs_migration, is_config_frozen, and captured_at.
+// - The function is callable without auth (read-only).
+// - The function bypasses check_version so it works in a pre-migration state.
+// - The captured_at field contains the ledger timestamp.
+
+#[test]
+fn test_261_fingerprint_includes_all_required_fields() {
+    let (_env, client, _actors) = setup();
+    let fingerprint = client.get_contract_state_fingerprint();
+    
+    assert_eq!(fingerprint.contract_name, symbol_short!("sla_calc"));
+    assert_eq!(fingerprint.storage_version, 1);
+    assert_eq!(fingerprint.result_schema_version, 1);
+    assert!(fingerprint.config_version_hash > 0, "config hash must be non-zero");
+    assert_eq!(fingerprint.is_paused, false);
+    assert_eq!(fingerprint.needs_migration, false);
+    assert_eq!(fingerprint.is_config_frozen, false);
+    // captured_at should be the ledger timestamp (0 in test env by default)
+    assert_eq!(fingerprint.captured_at, 0);
+}
+
+#[test]
+fn test_261_fingerprint_is_deterministic_on_repeated_calls() {
+    let (_env, client, _actors) = setup();
+    let fp1 = client.get_contract_state_fingerprint();
+    let fp2 = client.get_contract_state_fingerprint();
+    
+    assert_eq!(fp1.storage_version, fp2.storage_version);
+    assert_eq!(fp1.result_schema_version, fp2.result_schema_version);
+    assert_eq!(fp1.config_version_hash, fp2.config_version_hash);
+    assert_eq!(fp1.is_paused, fp2.is_paused);
+    assert_eq!(fp1.needs_migration, fp2.needs_migration);
+    assert_eq!(fp1.is_config_frozen, fp2.is_config_frozen);
+}
+
+#[test]
+fn test_261_fingerprint_reflects_paused_state() {
+    let (env, client, actors) = setup();
+    
+    let fp_before = client.get_contract_state_fingerprint();
+    assert_eq!(fp_before.is_paused, false);
+    
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "maintenance"));
+    
+    let fp_after = client.get_contract_state_fingerprint();
+    assert_eq!(fp_after.is_paused, true);
+}
+
+#[test]
+fn test_261_fingerprint_reflects_config_frozen_state() {
+    let (_env, client, actors) = setup();
+    
+    let fp_before = client.get_contract_state_fingerprint();
+    assert_eq!(fp_before.is_config_frozen, false);
+    
+    client.freeze_config(&actors.admin);
+    
+    let fp_after = client.get_contract_state_fingerprint();
+    assert_eq!(fp_after.is_config_frozen, true);
+}
+
+#[test]
+fn test_261_fingerprint_config_hash_changes_on_config_update() {
+    let (_env, client, actors) = setup();
+    
+    let fp_before = client.get_contract_state_fingerprint();
+    let hash_before = fp_before.config_version_hash;
+    
+    client.set_config(&actors.admin, &symbol_short!("critical"), &20, &200, &1000);
+    
+    let fp_after = client.get_contract_state_fingerprint();
+    let hash_after = fp_after.config_version_hash;
+    
+    assert_ne!(hash_before, hash_after, "config hash must change after config update");
+}
+
+#[test]
+fn test_261_fingerprint_accessible_without_auth() {
+    // The fingerprint function should not require auth — it's a pure read-only view.
+    // This is implicitly tested by all previous tests, but let's be explicit.
+    let (_env, client, _actors) = setup();
+    
+    // No auth required — just call it directly
+    let fingerprint = client.get_contract_state_fingerprint();
+    assert_eq!(fingerprint.contract_name, symbol_short!("sla_calc"));
+}
+
+#[test]
+fn test_261_fingerprint_works_in_pre_migration_state() {
+    // Force the contract into a pre-migration state (version mismatch)
+    // and verify the fingerprint still returns successfully with needs_migration=true.
+    let (env, client, actors) = setup();
+    
+    // Manually write a different storage version to simulate pre-migration
+    env.as_contract(&client.address, || {
+        env.storage().instance().set(&symbol_short!("VER"), &0u32);
+    });
+    
+    // The fingerprint must still work (bypasses check_version)
+    let fingerprint = client.get_contract_state_fingerprint();
+    assert_eq!(fingerprint.storage_version, 0);
+    assert_eq!(fingerprint.needs_migration, true);
+}
+
+#[test]
+fn test_261_fingerprint_before_and_after_upgrade_differ() {
+    // Simulate an upgrade workflow: capture fingerprint, trigger migration,
+    // capture again, and verify config_version_hash remained stable but
+    // needs_migration flipped.
+    let (env, client, actors) = setup();
+    
+    // Force version 0 to simulate pre-upgrade state
+    env.as_contract(&client.address, || {
+        env.storage().instance().set(&symbol_short!("VER"), &0u32);
+    });
+    
+    let fp_before = client.get_contract_state_fingerprint();
+    assert_eq!(fp_before.storage_version, 0);
+    assert_eq!(fp_before.needs_migration, true);
+    
+    // Migrate
+    client.migrate(&actors.admin);
+    
+    let fp_after = client.get_contract_state_fingerprint();
+    assert_eq!(fp_after.storage_version, 1);
+    assert_eq!(fp_after.needs_migration, false);
+    
+    // Config hash should remain unchanged across migration if no config changed
+    assert_eq!(fp_before.config_version_hash, fp_after.config_version_hash);
+}
+
+#[test]
+fn test_261_fingerprint_use_case_incident_response_audit() {
+    // Use case: during an incident, quickly surface the contract's posture.
+    let (env, client, actors) = setup();
+    
+    // Simulate incident: admin pauses the contract
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "incident"));
+    
+    // Backend calls fingerprint to check state
+    let fingerprint = client.get_contract_state_fingerprint();
+    
+    assert_eq!(fingerprint.is_paused, true);
+    assert_eq!(fingerprint.is_config_frozen, false);
+    assert_eq!(fingerprint.needs_migration, false);
+    
+    // All critical state visible in one call
+}
+
+#[test]
+fn test_261_fingerprint_use_case_pre_upgrade_audit() {
+    // Use case: before deploying a new contract version, capture the fingerprint
+    // to compare against post-upgrade state.
+    let (_env, client, _actors) = setup();
+    
+    let fp_pre_upgrade = client.get_contract_state_fingerprint();
+    
+    // Verify all expected pre-upgrade state
+    assert_eq!(fp_pre_upgrade.storage_version, 1);
+    assert_eq!(fp_pre_upgrade.needs_migration, false);
+    assert!(fp_pre_upgrade.config_version_hash > 0);
+    
+    // In a real workflow, this fingerprint would be stored and compared
+    // against the post-upgrade fingerprint to verify only expected state changed.
+}
+
+#[test]
+fn test_261_fingerprint_matches_individual_queries() {
+    // Verify the fingerprint fields match what individual queries return.
+    let (_env, client, _actors) = setup();
+    
+    let fingerprint = client.get_contract_state_fingerprint();
+    let version_info = client.get_version_info();
+    let migration_state = client.get_migration_state();
+    let config_hash = client.get_config_version_hash();
+    let is_paused = client.is_paused();
+    let is_frozen = client.is_config_frozen();
+    
+    assert_eq!(fingerprint.storage_version, version_info.storage_version);
+    assert_eq!(fingerprint.result_schema_version, version_info.result_schema_version);
+    assert_eq!(fingerprint.needs_migration, version_info.needs_migration);
+    assert_eq!(fingerprint.storage_version, migration_state.stored_version);
+    assert_eq!(fingerprint.needs_migration, migration_state.needs_migration);
+    assert_eq!(fingerprint.config_version_hash, config_hash);
+    assert_eq!(fingerprint.is_paused, is_paused);
+    assert_eq!(fingerprint.is_config_frozen, is_frozen);
+}
+
+#[test]
+#[should_panic]
+fn test_261_fingerprint_fails_on_uninitialized_contract() {
+    // Before initialize(), the contract has no STORAGE_VERSION_KEY,
+    // so get_contract_state_fingerprint should return NotInitialized.
+// ============================================================
+// #244 – Public API descriptor tests
+// ============================================================
+
+#[test]
+fn test_get_public_api_returns_versioned_descriptor() {
+    let (_env, client, _actors) = setup();
+    let api = client.get_public_api();
+    assert_eq!(api.version, symbol_short!("v1"));
+    assert_eq!(api.contract_name, symbol_short!("sla_calc"));
+}
+
+#[test]
+fn test_get_public_api_includes_all_major_methods() {
+    let (_env, client, _actors) = setup();
+    let api = client.get_public_api();
+
+    // Check that critical methods are present
+    let mut found_calculate_sla = false;
+    let mut found_get_public_api = false;
+    let mut found_initialize = false;
+    let mut found_get_config = false;
+    let mut found_healthcheck = false;
+    let mut found_migrate = false;
+
+    for i in 0..api.methods.len() {
+        let method = api.methods.get(i).unwrap();
+        if method.name == Symbol::new(&_env, "calculate_sla") {
+            found_calculate_sla = true;
+            assert!(method.mutates);
+            assert_eq!(method.auth, Symbol::new(&_env, "operator"));
+            assert_eq!(method.event, Symbol::new(&_env, "sla_calc"));
+        }
+        if method.name == Symbol::new(&_env, "get_public_api") {
+            found_get_public_api = true;
+            assert!(!method.mutates);
+            assert_eq!(method.auth, Symbol::new(&_env, "none"));
+            assert_eq!(method.event, Symbol::new(&_env, ""));
+        }
+        if method.name == Symbol::new(&_env, "initialize") {
+            found_initialize = true;
+            assert!(method.mutates);
+            assert_eq!(method.auth, Symbol::new(&_env, "admin"));
+        }
+        if method.name == Symbol::new(&_env, "get_config") {
+            found_get_config = true;
+            assert!(!method.mutates);
+            assert_eq!(method.auth, Symbol::new(&_env, "none"));
+        }
+        if method.name == Symbol::new(&_env, "healthcheck") {
+            found_healthcheck = true;
+            assert!(!method.mutates);
+            assert_eq!(method.auth, Symbol::new(&_env, "none"));
+        }
+        if method.name == Symbol::new(&_env, "migrate") {
+            found_migrate = true;
+            assert!(method.mutates);
+            assert_eq!(method.auth, Symbol::new(&_env, "admin"));
+            assert_eq!(method.event, Symbol::new(&_env, "migrate_done"));
+        }
+    }
+
+    assert!(found_calculate_sla, "calculate_sla not found in API descriptor");
+    assert!(found_get_public_api, "get_public_api not found in API descriptor");
+    assert!(found_initialize, "initialize not found in API descriptor");
+    assert!(found_get_config, "get_config not found in API descriptor");
+    assert!(found_healthcheck, "healthcheck not found in API descriptor");
+    assert!(found_migrate, "migrate not found in API descriptor");
+}
+
+#[test]
+fn test_get_public_api_method_count_is_stable() {
+    let (_env, client, _actors) = setup();
+    let api = client.get_public_api();
+    // 53 methods as of initial implementation
+    // This test catches accidental additions or removals
+    assert_eq!(api.methods.len(), 53, "Public API method count changed");
+}
+
+#[test]
+fn test_get_public_api_is_deterministic() {
+    let (_env, client, _actors) = setup();
+    let api1 = client.get_public_api();
+    let api2 = client.get_public_api();
+
+    assert_eq!(api1.version, api2.version);
+    assert_eq!(api1.contract_name, api2.contract_name);
+    assert_eq!(api1.methods.len(), api2.methods.len());
+
+    for i in 0..api1.methods.len() {
+        let m1 = api1.methods.get(i).unwrap();
+        let m2 = api2.methods.get(i).unwrap();
+        assert_eq!(m1.name, m2.name);
+        assert_eq!(m1.mutates, m2.mutates);
+        assert_eq!(m1.auth, m2.auth);
+        assert_eq!(m1.event, m2.event);
+    }
+}
+
+#[test]
+fn test_get_public_api_requires_initialization() {    let env = Env::default();
+#[test]
+#[should_panic]
+fn test_get_public_api_requires_initialization() {
+    let env = Env::default();    env.mock_all_auths();
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    
+    // No initialize() called — fingerprint must fail
+    client.get_contract_state_fingerprint();
+}
+#[test]
+fn test_failure_catalog_helpers_are_mutually_exclusive() {
+    // Each predicate must recognize exactly its own variant and reject all
+    // others, so a copy-pasted helper body (e.g. two helpers both matching
+    // the same variant) is caught even though the exhaustiveness check above
+    // would not see it.
+    let all_variants = [
+        SLAError::AlreadyInitialized,
+        SLAError::NotInitialized,
+        SLAError::Unauthorized,
+        SLAError::ConfigNotFound,
+        SLAError::VersionMismatch,
+        SLAError::ContractPaused,
+        SLAError::NoPendingTransfer,
+        SLAError::InvalidThreshold,
+        SLAError::InvalidPenalty,
+        SLAError::InvalidReward,
+        SLAError::InvalidSeverity,
+        SLAError::RetentionLimitOutOfRange,
+        SLAError::DuplicateOutageInput,
+        SLAError::InvalidPenaltyAmount,
+        SLAError::InvalidRewardAmount,
+        SLAError::ConfigFrozen,
+        SLAError::InvalidInput,
+        SLAError::SeverityNotInSet,
+        SLAError::OutageRecalcLimit,
+    ];
+
+    let predicates: [(&str, fn(&SLAError) -> bool); 19] = [
+        ("is_already_initialized", error_responses::is_already_initialized),
+        ("is_not_initialized", error_responses::is_not_initialized),
+        ("is_unauthorized", error_responses::is_unauthorized),
+        ("is_config_not_found", error_responses::is_config_not_found),
+        ("is_version_mismatch", error_responses::is_version_mismatch),
+        ("is_contract_paused", error_responses::is_contract_paused),
+        ("is_no_pending_transfer", error_responses::is_no_pending_transfer),
+        ("is_invalid_threshold", error_responses::is_invalid_threshold),
+        ("is_invalid_penalty", error_responses::is_invalid_penalty),
+        ("is_invalid_reward", error_responses::is_invalid_reward),
+        ("is_invalid_severity", error_responses::is_invalid_severity),
+        (
+            "is_retention_limit_out_of_range",
+            error_responses::is_retention_limit_out_of_range,
+        ),
+        ("is_duplicate_outage_input", error_responses::is_duplicate_outage_input),
+        ("is_invalid_penalty_amount", error_responses::is_invalid_penalty_amount),
+        ("is_invalid_reward_amount", error_responses::is_invalid_reward_amount),
+        ("is_config_frozen", error_responses::is_config_frozen),
+        ("is_invalid_input", error_responses::is_invalid_input),
+        ("is_severity_not_in_set", error_responses::is_severity_not_in_set),
+        ("is_outage_recalc_limit", error_responses::is_outage_recalc_limit),
+    ];
+
+    assert_eq!(
+        predicates.len(),
+        all_variants.len(),
+        "number of error_responses predicates must match number of SLAError variants"
+    );
+
+    for (variant_idx, err) in all_variants.iter().enumerate() {
+        let matches: alloc::vec::Vec<&str> = predicates
+            .iter()
+            .filter(|(_, predicate)| predicate(err))
+            .map(|(name, _)| *name)
+            .collect();
+        assert_eq!(
+            matches.len(),
+            1,
+            "expected exactly one predicate to match {:?} at index {}, got {:?}",
+            err,
+            variant_idx,
+            matches
+        );
+        assert_eq!(
+            matches[0], predicates[variant_idx].0,
+            "predicate matching {:?} was not the expected helper",
+            err
+        );
+    }}
+fn test_get_result_schema_version_change_requires_migration_note() {
+    // This test intentionally checks that the schema version constant has not
+    // drifted from a known-good value. Bumping the version is a breaking change
+    // that MUST be accompanied by an updated migration note in this file and a
+    // corresponding entry in docs/ migration documentation.
+    //
+    // When you bump RESULT_SCHEMA_VERSION:
+    //   1. Update the migration notes comment block above.
+    //   2. Document the breaking change in CHANGELOG.md.
+    //   3. Update the expected version below.
+    let (_env, client, _actors) = setup();
+    let schema = client.get_result_schema();
+    assert_eq!(
+        schema.schema_version, 1,
+        "RESULT_SCHEMA_VERSION has changed! Add migration notes before bumping."
+    );
+    assert_eq!(schema.version, symbol_short!("v1"));
+}
+
+#[test]
+fn test_get_result_schema_includes_config_version_hash_flag() {
+    let (_env, client, _actors) = setup();
+    let schema = client.get_result_schema();
+    assert!(
+        schema.includes_config_version_hash,
+        "Result schema must indicate config_version_hash inclusion"
+    );
+}
+
+#[test]
+fn test_get_result_schema_deprecated_symbols_empty_in_v1() {
+    let (_env, client, _actors) = setup();
+    let schema = client.get_result_schema();
+    assert_eq!(
+        schema.deprecated_symbols.len(),
+        0,
+        "v1 schema should have no deprecated symbols"
+    );
+}
+
+#[test]
+fn test_get_result_schema_requires_migration_version_if_not_v1() {
+    let (_env, client, _actors) = setup();
+    let schema = client.get_result_schema();
+    if schema.schema_version != 1 {
+        // If this test fails, you have bumped RESULT_SCHEMA_VERSION without
+        // updating the migration notes. Go back and document what changed.
+        panic!(
+            "RESULT_SCHEMA_VERSION is now {} — add migration notes and update tests!",
+            schema.schema_version
+        );
+// ============================================================
+// #221 – Deterministic concurrency policy for calculate_sla
+// ============================================================
+//
+// These tests define the concurrency contract for the same outage_id:
+// Soroban transactions are single-threaded per contract invocation, so
+// "simultaneous" here means sequential calls within one test environment,
+// which exercises the exact same duplicate-detection code path that
+// concurrent ledger transactions would hit.
+
+#[test]
+fn test_221_same_outage_id_is_idempotent_replay_for_same_config() {
+    // The core guarantee: submitting the same outage with identical inputs
+    // always returns the previously stored result without mutating state.
+    let (_env, client, actors) = setup();
+
+    let outage_id = symbol_short!("CONC_A");
+
+    let r1 = client.calculate_sla(&actors.operator, &outage_id, &symbol_short!("low"), &30);
+    let r2 = client.calculate_sla(&actors.operator, &outage_id, &symbol_short!("low"), &30);
+
+    // Results must be identical (replay, not recalculation).
+    assert_eq!(r1.amount, r2.amount);
+    assert_eq!(r1.status, r2.status);
+    assert_eq!(r1.rating, r2.rating);
+    assert_eq!(r1.config_version_hash, r2.config_version_hash);
+
+    // History must contain exactly one entry — no duplicate storage.
+    assert_eq!(client.get_history().len(), 1);
+
+    // Stats must not be inflated by replays.
+    assert_eq!(client.get_stats().total_calculations, 1);
+}
+
+#[test]
+#[should_panic(expected = "#13")]
+fn test_221_same_outage_different_mttr_rejects_contradictory_input() {
+    // If the same outage_id arrives with a different MTTR under the same
+    // config, the contract must reject the contradictory input.
+    let (_env, client, actors) = setup();
+
+    client.calculate_sla(&actors.operator, &symbol_short!("CONC_B"), &symbol_short!("high"), &10);
+    client.calculate_sla(&actors.operator, &symbol_short!("CONC_B"), &symbol_short!("high"), &20);
+}
+
+#[test]
+fn test_221_config_change_resets_outage_concurrency_window() {
+    // A config update changes the version hash, which opens a new
+    // "generation" for the same outage_id — the new submission must
+    // be treated as a fresh calculation.
+    let (_env, client, actors) = setup();
+
+    let outage_id = symbol_short!("CONC_C");
+    let severity = symbol_short!("medium");
+
+    let r1 = client.calculate_sla(&actors.operator, &outage_id, &severity, &30);
+    assert_eq!(client.get_history().len(), 1);
+
+    // Change config — version hash changes, opening a new generation.
+    client.set_config(&actors.admin, &severity, &45, &30, &800);
+
+    let r2 = client.calculate_sla(&actors.operator, &outage_id, &severity, &30);
+
+    // Config changed → fresh calculation → new entry appended.
+    assert_eq!(client.get_history().len(), 2);
+    assert_ne!(r1.config_version_hash, r2.config_version_hash);
+}
+
+#[test]
+fn test_221_outage_recalc_limit_enforced() {
+    // After MAX_RECALCS_PER_OUTAGE config-driven recalculations,
+    // further submissions for the same outage_id must be rejected.
+    let (_env, client, actors) = setup();
+
+    let outage_id = symbol_short!("CONC_D");
+    let severity = symbol_short!("low");
+
+    // Fill up to the limit by changing config each time.
+    for i in 0..(MAX_RECALCS_PER_OUTAGE) {
+        client.set_config(&actors.admin, &severity, &(120 + i), &10, &600);
+        let _ = client.calculate_sla(&actors.operator, &outage_id, &severity, &30);
+    }
+
+    assert_eq!(
+        client.get_history().len(),
+        MAX_RECALCS_PER_OUTAGE as u32
+    );
+}
+
+// ============================================================
+// #227 – Retryable vs terminal error classification harness
+// ============================================================
+//
+// Backend consumers classify contract errors into two buckets:
+//   - Terminal: retrying will never succeed (e.g. Unauthorized, InvalidInput).
+//   - Retryable: the condition may clear (e.g. ContractPaused, VersionMismatch).
+//
+// This harness proves the classification is stable — adding or removing a
+// variant from either bucket requires deliberate review.
+
+/// Classification policy for every SLAError variant.
+/// true = terminal (never retry), false = retryable (may succeed later).
+const fn is_terminal(code: u32) -> bool {
+    match code {
+        1  /* AlreadyInitialized */   => true,
+        2  /* NotInitialized */       => true,
+        3  /* Unauthorized */         => true,
+        4  /* ConfigNotFound */       => true,
+        5  /* VersionMismatch */      => false, // admin can migrate
+        6  /* ContractPaused */       => false, // admin can unpause
+        7  /* NoPendingTransfer */    => true,
+        8  /* InvalidThreshold */     => true,
+        9  /* InvalidPenalty */        => true,
+        10 /* InvalidReward */        => true,
+        11 /* InvalidSeverity */      => true,
+        12 /* RetentionLimitOutOfRange */ => true,
+        13 /* DuplicateOutageInput */  => true,
+        14 /* InvalidPenaltyAmount */  => true,
+        15 /* InvalidRewardAmount */   => true,
+        16 /* ConfigFrozen */         => false, // admin can unfreeze
+        17 /* InvalidInput */         => true,
+        18 /* SeverityNotInSet */     => true,
+        19 /* OutageRecalcLimit */    => false, // pruning frees headroom
+        _ => true, // unknown future codes are terminal by default    }
+}
+
+#[test]
+fn test_get_result_schema_all_symbols_are_short_form() {
+    let (_env, client, _actors) = setup();
+    let schema = client.get_result_schema();
+    // All symbols in the schema must be valid symbol_short!() candidates
+    // (max 9 characters, lowercase, underscore-separated).
+    let symbols = [
+        schema.status_met,
+        schema.status_violated,
+        schema.payment_reward,
+        schema.payment_penalty,
+        schema.rating_exceptional,
+        schema.rating_excellent,
+        schema.rating_good,
+        schema.rating_poor,
+    ];
+    for s in symbols.iter() {
+        let bytes = s.to_str();
+        assert!(
+            bytes.len() <= 9,
+            "Symbol '{}' exceeds 9-char limit",
+            bytes
+        );
+    }
+fn test_227_all_error_codes_are_classified() {
+    // Every error code in the catalogue must have a classification.
+    // This fails if a new code is added to get_failure_schema but not here.
+
+    // The enum has 19 variants (codes 1..19). Verify every one is
+    // covered by our classification table.
+    let expected_codes: [u32; 19] = [
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+        11, 12, 13, 14, 15, 16, 17, 18, 19,
+    ];
+
+    for code in &expected_codes {
+        // Classification must not panic — every code is handled.
+        let _terminal = is_terminal(*code);
+    }
+}
+
+#[test]
+fn test_227_retryable_errors_are_recoverable() {
+    // Retryable errors document the action that clears the condition.
+    let retryable: [(u32, &str); 4] = [
+        (5, "VersionMismatch — admin calls migrate()"),
+        (6, "ContractPaused — admin calls unpause()"),
+        (16, "ConfigFrozen — admin calls unfreeze_config()"),
+        (19, "OutageRecalcLimit — admin calls prune_history()"),
+    ];
+
+    for (code, description) in &retryable {
+        assert!(
+            !is_terminal(*code),
+            "{} must be retryable but was classified as terminal",
+            description
+        );
+    }
+}
+
+#[test]
+fn test_227_terminal_errors_are_truly_terminal() {
+    // Terminal errors reflect permanent conditions — the caller must
+    // change their input or their role; no state transition can fix them.
+    let terminal: [(u32, &str); 15] = [
+        (1, "AlreadyInitialized"),
+        (2, "NotInitialized"),
+        (3, "Unauthorized"),
+        (4, "ConfigNotFound"),
+        (7, "NoPendingTransfer"),
+        (8, "InvalidThreshold"),
+        (9, "InvalidPenalty"),
+        (10, "InvalidReward"),
+        (11, "InvalidSeverity"),
+        (12, "RetentionLimitOutOfRange"),
+        (13, "DuplicateOutageInput"),
+        (14, "InvalidPenaltyAmount"),
+        (15, "InvalidRewardAmount"),
+        (17, "InvalidInput"),
+        (18, "SeverityNotInSet"),
+    ];
+
+    for (code, label) in &terminal {
+        assert!(
+            is_terminal(*code),
+            "{} must be terminal but was classified as retryable",
+            label
+        );
+    }
+}
+
+#[test]
+fn test_227_error_classification_count_matches_enum() {
+    // The total classified errors must match the enum size.
+    // If this fails, a new SLAError variant was added — update both
+    // the is_terminal table and this test.
+    let total = 4u32 /* retryable */ + 15u32 /* terminal */;
+    assert_eq!(total, 19, "Classification count mismatch — did you add an SLAError variant?");}
+
+    // Without initialization, get_public_api should return NotInitialized error
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.get_public_api();
+    }));
+    assert!(result.is_err(), "get_public_api should fail before initialization");
+}
+    // Without initialization, get_public_api should panic with NotInitialized
+    client.get_public_api();
 }

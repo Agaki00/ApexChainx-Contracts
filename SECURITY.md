@@ -70,6 +70,9 @@ validation gates MUST pass (enforced by the
 5. Update `CHANGELOG.md` with the release notes
 
 ---
+### Binary Provenance
+
+Release WASM artifacts are governed by the [WASM Binary Reproducibility Policy](docs/WASM_REPRODUCIBILITY_POLICY.md). Every release includes a SHA-256 manifest that links the deployed bytecode to its exact build inputs. Maintainers and security reviewers should verify the published checksum against a local build before deploying.
 
 ## Reporting a Vulnerability
 

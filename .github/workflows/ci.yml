@@ -23,8 +23,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.94.1
         with:
@@ -108,12 +106,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
 
       - name: Run tests
         working-directory: apexchainx_calculator
         run: cargo test --lib
+
+      # Issue #255: Result schema migration guardrail.
+      # schema_migration_tests.rs contains a compile-time exhaustive SLAResult
+      # destructure and runtime assertions that RESULT_SCHEMA_VERSION and
+      # RESULT_SCHEMA_FIELD_COUNT match the actual struct layout and the values
+      # returned by get_result_schema(). Any PR that modifies SLAResult without
+      # updating both constants will fail here.
+      # See: docs/result-schema-migration-guard.md
+      - name: Result schema migration guard
+        working-directory: apexchainx_calculator
+        run: cargo test --lib schema_migration_tests
 
       # Issue #81: Normalize snapshot artifacts before upload so that volatile
       # fields (timestamp, elapsed_ms, generated_at) are stripped and keys are
@@ -155,6 +164,72 @@ jobs:
         working-directory: apexchainx_calculator
         run: cargo test --lib fuzz_tests::
 
+  release-tests:
+    name: Release Tests (#90)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apexchainx_calculator/target
+          key: release-test-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            release-test-${{ runner.os }}-cargo-
+
+      - name: Run tests with --release (#90)
+        working-directory: apexchainx_calculator
+        run: cargo test --release --lib
+
+
+  parity-check:
+    name: Parity Check (canonical baseline)
+    runs-on: ubuntu-latest
+    # This job is a release gate: it verifies that the current compute_result
+    # implementation produces identical outputs to the locked-in historical
+    # golden vectors in test_snapshots/tests/parity_baseline.json.
+    # A failure here means a calculation regression has been introduced and
+    # must be reviewed before merging or cutting a release.
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apexchainx_calculator/target
+          key: parity-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            parity-${{ runner.os }}-cargo-
+
+      - name: Run parity checker against canonical baseline
+        working-directory: apexchainx_calculator
+        run: cargo test --lib parity_tests::
+
+      - name: Upload parity baseline as artifact (for release traceability)
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-baseline
+          path: apexchainx_calculator/test_snapshots/tests/parity_baseline.json
+          retention-days: 90
+
 
   provenance-hashes:
     name: Provenance & Hashes
@@ -169,13 +244,18 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Build WASM release
-        working-directory: apexchainx_calculator
-        run: cargo build --target wasm32-unknown-unknown --release
+      - name: Install just
+        run: cargo install just
 
+      - name: Generate and save hash
+        run: just hash-save
+
+      - name: Verify hash against committed file
+        run: just hash-verify
+        continue-on-error: true
       - name: Generate hash
         run: |
-          WASM=target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
+          WASM=apexchainx_calculator/target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
           if [ -f "$WASM" ]; then
             sha256sum "$WASM" | awk '{print $1 "  apexchainx_calculator.wasm"}' > provenance.sha256
             echo "Hash generated successfully"
@@ -184,10 +264,9 @@ jobs:
             echo "WASM file not found at $WASM"
             exit 1
           fi
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: pr-provenance-hash
-          path: provenance.sha256
+          path: artifacts/apexchainx_calculator.wasm.sha256
           retention-days: 30
