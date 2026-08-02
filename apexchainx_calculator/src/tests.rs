@@ -2863,6 +2863,62 @@ fn test_get_history_page_empty_history() {
     assert_eq!(page.len(), 0);
 }
 
+// ============================================================
+// #263 – Pagination boundary & overflow safety
+// ============================================================
+
+/// A `limit` of `u32::MAX` must not overflow `offset + limit`; it simply
+/// returns everything that remains after `offset` (saturating clamp).
+#[test]
+fn test_get_history_page_max_limit_returns_all_remaining_without_overflow() {
+    let (_env, client, actors) = setup();
+
+    for i in 0..5u32 {
+        let oid = Symbol::new(&_env, &alloc::format!("PG_MAX_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    // offset + u32::MAX would wrap in unchecked arithmetic; saturating_add
+    // must clamp to len so the whole tail is returned, never a wrong slice.
+    let page = client.get_history_page(&2, &u32::MAX);
+    assert_eq!(page.len(), 3);
+    assert_eq!(page.get(0).unwrap().outage_id, Symbol::new(&_env, "PG_MAX_2"));
+    assert_eq!(page.get(2).unwrap().outage_id, Symbol::new(&_env, "PG_MAX_4"));
+}
+
+/// An `offset` at `u32::MAX` is beyond the end of any real history and must
+/// return an empty page without panicking on the interior arithmetic.
+#[test]
+fn test_get_history_page_extreme_offset_is_empty_without_panic() {
+    let (_env, client, actors) = setup();
+
+    for i in 0..3u32 {
+        let oid = Symbol::new(&_env, &alloc::format!("PG_EOF_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    let page = client.get_history_page(&u32::MAX, &1);
+    assert_eq!(page.len(), 0);
+}
+
+/// `offset + limit` at the extreme (both near `u32::MAX`) saturates to the
+/// real history length rather than wrapping to a bogus small end index.
+#[test]
+fn test_get_history_page_offset_plus_limit_saturates() {
+    let (_env, client, actors) = setup();
+
+    for i in 0..4u32 {
+        let oid = Symbol::new(&_env, &alloc::format!("PG_SAT_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    // offset (3) + limit (u32::MAX - 1) would overflow u32 unchecked;
+    // saturation must yield end = len, returning the single remaining entry.
+    let page = client.get_history_page(&3, &(u32::MAX - 1));
+    assert_eq!(page.len(), 1);
+    assert_eq!(page.get(0).unwrap().outage_id, Symbol::new(&_env, "PG_SAT_3"));
+}
+
 #[test]
 fn test_get_history_page_zero_limit_returns_empty() {
     let (_env, client, actors) = setup();

@@ -268,7 +268,7 @@ None require caller auth, mutate storage, or emit events.
 | `get_severity_telemetry` | `CALCCNT`, `VIOLCNT` | Reads packed `u128` telemetry lanes, decodes per-severity rates. |
 | `get_economic_exposure` | `CONFIG_KEY` | Reads all canonical configs, computes max-reward + penalty-rate totals. |
 | `get_history` | `HISTORY_KEY` | Returns full `Vec<SLAResult>`. |
-| `get_history_page` | `HISTORY_KEY` | Bounded slice of history. |
+| `get_history_page` | `HISTORY_KEY` | Bounded slice of history. See the [History Pagination Policy](HISTORY_PAGINATION_POLICY.md) (issue #263): offset-based, oldest-first, empty-page end-of-history signalling, saturating `offset + limit` arithmetic. |
 | `get_history_by_outage` | `HISTORY_KEY` | Filters history by `outage_id`. |
 | `get_latest_by_outage` | `HISTORY_KEY` | Scans history for newest match. |
 | `get_retention_limit` | `RETENTION_LIMIT_KEY` | Returns `u32`, defaults to `MAX_HISTORY_SIZE`. |
