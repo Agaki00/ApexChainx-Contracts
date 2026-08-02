@@ -2,6 +2,28 @@
 //!
 //! This module contains the delegated implementation of `calculate_sla`,
 //! `calculate_sla_view`, stats management, and telemetry recording.
+//!
+//! # Boundary between business logic and side effects
+//!
+//! The computation pipeline enforces a strict separation:
+//!
+//! | Phase | What happens | Side effects? |
+//! |---|---|---|
+//! | **1. Pre-flight** | Version check, pause check, operator auth, config load | Read-only |
+//! | **2. Pure computation** | `compute_result()` — deterministic SLA outcome from inputs | None |
+//! | **3. State mutation** | History anti-spam, telemetry recording, stats increment | Storage writes only |
+//! | **4. Event publication** | `publish_sla_event()` + `publish_settlement_intent_event()` | Event emission |
+//!
+//! This separation ensures:
+//! - `compute_result()` can be called by `calculate_sla_view` (read-only audit)
+//!   without touching storage or emitting events.
+//! - Event schemas can evolve independently of the computation rules.
+//! - Tests can validate business logic without needing an event assertion harness
+//!   by calling `compute_result()` directly.
+//! - The same outcome is deterministic regardless of whether events are
+//!   actually published (e.g. in dry-run simulations).
+//!
+//! See [`crate::event::EventPublisher`] for the event publication abstraction.
 
 use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
@@ -17,6 +39,17 @@ use crate::{
 /// See [`crate::SLACalculatorContract::calculate_sla`] for the full API
 /// contract and [`crate::SLAError::DuplicateOutageInput`] for the
 /// duplicate-detection semantics.
+///
+/// # Execution phases
+///
+/// This function follows a strict phased execution model:
+/// 1. **Pre-flight** — version check, pause guard, operator authorization, config load.
+/// 2. **Pure computation** — `compute_result()` produces a deterministic outcome.
+/// 3. **State mutation** — anti-spam dedup, history append, telemetry, stats update.
+/// 4. **Event publication** — `publish_sla_event()` + `publish_settlement_intent_event()`.
+///
+/// Phases 1-3 constitute the **business logic** boundary. Phase 4 is the sole
+/// **side-effect** phase and never alters the returned `SLAResult`.
 pub fn calculate_sla(
     env: &Env,
     caller: &Address,
@@ -24,12 +57,15 @@ pub fn calculate_sla(
     severity: Symbol,
     mttr_minutes: u32,
 ) -> Result<SLAResult, SLAError> {
+    // ── Phase 1: Pre-flight (read-only auth & config) ──────────────────
     crate::SLACalculatorContract::check_version(env)?;
     require_not_paused(env)?;
     crate::SLACalculatorContract::require_operator(env, caller)?;
 
     let cfg = crate::SLACalculatorContract::load_config(env, &severity)?;
     let config_version_hash = crate::SLACalculatorContract::compute_config_version_hash(env)?;
+
+    // ── Phase 2: Pure computation (no state reads/writes) ─────────────
     let result = compute_result(
         outage_id.clone(),
         mttr_minutes,
@@ -37,6 +73,8 @@ pub fn calculate_sla(
         config_version_hash,
         env.ledger().timestamp(),
     )?;
+
+    // ── Phase 3: State mutation (storage writes only) ─────────────────
     let mut history: Vec<SLAResult> = env
         .storage()
         .instance()
@@ -95,6 +133,10 @@ pub fn calculate_sla(
         increment_stats(env, true, result.amount, 0);
     }
 
+    // ── Phase 4: Event publication (side effects only) ────────────────
+    // Published after all state mutations are committed so that indexers
+    // observe a consistent view. These calls never affect the returned
+    // SLAResult and can be toggled independently for dry-run modes.
     publish_sla_event(env, severity.clone(), &result);
     publish_settlement_intent_event(env, severity, &result);
 
