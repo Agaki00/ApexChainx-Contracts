@@ -2974,6 +2974,29 @@ pub fn get_full_audit_state(env: Env) -> Result<AuditState, SLAError> {
     /// Returns a bounded page of history entries.
     /// `offset` is zero-based; entries are ordered oldest-first (insertion order).
     /// Returns an empty Vec when `offset` is beyond the end of history.
+    /// Returns a paginated slice of the SLA history.
+    ///
+    /// # Pagination policy (issue #263)
+    ///
+    /// The accessor is **offset-based** and deterministic:
+    ///
+    /// - `offset` is the 0-based index of the first entry to return. History is
+    ///   stored oldest-first, so `offset = 0` is the earliest recorded result.
+    /// - `limit` is the maximum number of entries returned per page. It is **not**
+    ///   clamped to an upper bound: the effective page is `min(limit, len - offset)`,
+    ///   so a page shorter than the requested `limit` signals end-of-history. A
+    ///   `limit` larger than the remaining history simply returns everything that
+    ///   remains.
+    /// - An out-of-range `offset` (`offset >= len`) returns an **empty page**, not
+    ///   an error — empty pages are the canonical end-of-history signal, so
+    ///   consumers can loop until they see one without special-casing.
+    /// - `limit == 0` returns an empty page.
+    /// - Offsets and limits are `u32`. The interior computation `offset + limit` is
+    ///   performed with saturating arithmetic so that extreme values (e.g.
+    ///   `u32::MAX`) can never overflow/wrap into a wrong slice — the end index is
+    ///   always `min(offset + limit, len)` clamped to the real history length.
+    ///
+    /// See `docs/HISTORY_PAGINATION_POLICY.md` for the full policy.
     pub fn get_history_page(env: Env, offset: u32, limit: u32) -> Result<Vec<SLAResult>, SLAError> {
         Self::check_version(&env)?;
         let history: Vec<SLAResult> = env
@@ -2986,7 +3009,11 @@ pub fn get_full_audit_state(env: Env) -> Result<AuditState, SLAError> {
         if offset >= len || limit == 0 {
             return Ok(page);
         }
-        let end = (offset + limit).min(len);
+        // Saturating arithmetic: `offset + limit` could otherwise wrap for extreme
+        // `u32` inputs (e.g. offset near `u32::MAX`), silently slicing the wrong
+        // range. Saturation clamps the end index to the real history length, which
+        // is the correct behaviour for any page that asks for more than remains.
+        let end = offset.saturating_add(limit).min(len);
         for i in offset..end {
             page.push_back(history.get(i).unwrap());
         }
