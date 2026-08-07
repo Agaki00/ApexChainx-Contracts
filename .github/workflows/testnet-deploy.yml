@@ -49,7 +49,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            apexchainx_calculator/target
+            target
           key: testnet-deploy-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             testnet-deploy-${{ runner.os }}-cargo-

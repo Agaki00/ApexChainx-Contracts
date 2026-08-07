@@ -126,7 +126,8 @@ jobs:
         id: hash
         run: |
           echo "=== Artifact hash ==="
-          WASM=apexchainx_calculator/target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
+          # Workspace build — artifacts land in the ROOT target/, not apexchainx_calculator/target/.
+          WASM=target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
           WASM_HASH=$(sha256sum "$WASM" | awk '{print $1}')
           echo "wasm_hash=$WASM_HASH" >> "$GITHUB_OUTPUT"
           echo "$WASM_HASH  apexchainx_calculator.wasm" > validation-results/wasm_artifact_hash.txt
@@ -137,7 +138,7 @@ jobs:
       - name: Verify manifest self-consistency
         run: |
           echo "=== Hash self-consistency ==="
-          cp apexchainx_calculator/target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm .
+          cp target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm .
           sha256sum -c validation-results/wasm_artifact_hash.txt
           rm apexchainx_calculator.wasm
 
@@ -260,5 +261,5 @@ jobs:
           name: release-validation-report
           path: |
             validation-results/
-            apexchainx_calculator/target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
+            target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
           retention-days: 90
