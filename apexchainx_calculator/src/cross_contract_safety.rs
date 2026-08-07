@@ -73,7 +73,7 @@ pub struct SafeCallResult {
 /// re-invoke with reversed semantics.
 #[allow(missing_docs)]
 #[contracttype]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompensationAction {
     /// A tag identifying what kind of compensation to apply.
     /// E.g., "unlock_funds", "reverse_settle", "unpause_escrow".

@@ -1,3 +1,5 @@
+//! Combined audit-state envelope for one-shot backend bootstrap reads.
+
 use soroban_sdk::{contracttype, Address, Vec};
 
 use crate::{PauseInfo, SLAConfigSnapshot, SLAResultSchema, SLAStats};

@@ -214,9 +214,11 @@ machete:
     cargo install cargo-machete --locked 2>/dev/null; cd {{crate}} && cargo machete
 
 # Check for unused dependencies with cargo-udeps.                [CI: Unused dependency gate]
-# Requires nightly Rust — install with: rustup toolchain install nightly
+# Requires nightly Rust. Pin nightly-2026-02-01: newer nightlies (>= 1.96)
+# break ethnum 1.5.0, which cargo-udeps builds as a transitive dependency.
+# rustup auto-installs the toolchain on first use.
 udeps:
-    cargo install cargo-udeps --locked 2>/dev/null; cd {{crate}} && cargo +nightly udeps --all-targets
+    cargo install cargo-udeps --locked 2>/dev/null; cd {{crate}} && cargo +nightly-2026-02-01 udeps --all-targets
 # --------------------------------------------------------------- tooling -----
 # ----------------------------------------------------------- release ------
 
@@ -271,6 +273,5 @@ clean:
     cd {{crate}} && cargo clean
 
 # Everything CI gates on, in CI's order. Run before opening a PR.
-ci: fmt-check lint check no-std test fuzz parity-check wasm
-ci: fmt-check lint check no-std machete udeps test fuzz wasm    @echo "✓ local CI equivalent passed"
-ci: fmt-check lint check no-std test fuzz wasm verify-snapshots    @echo "✓ local CI equivalent passed"
+ci: fmt-check lint check no-std test fuzz parity-check wasm machete udeps verify-snapshots
+    @echo "✓ local CI equivalent passed"

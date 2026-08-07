@@ -1,3 +1,5 @@
+//! Structured event payloads emitted by the contract.
+
 use soroban_sdk::{contracttype, Env, Symbol};
 
 /// Structured event payload for calculation execution events.
@@ -5,6 +7,7 @@ use soroban_sdk::{contracttype, Env, Symbol};
 /// This struct is the canonical event shape emitted when a business-logic
 /// calculation completes. It is defined here rather than in `calculation.rs`
 /// so that the event schema and the computation logic can evolve independently.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CalculationExecutedEventV1 {
@@ -50,7 +53,7 @@ impl EventPublisher {
         timestamp: u64,
     ) {
         let payload = CalculationExecutedEventV1 {
-            input_key,
+            input_key: input_key.clone(),
             input_value,
             result_value,
             timestamp,

@@ -21,9 +21,7 @@
 
 use soroban_sdk::{contracttype, symbol_short, Env, Symbol, Vec};
 
-use crate::{
-    SLACalculatorContract, SLAError, RESULT_SCHEMA_VERSION, STORAGE_VERSION,
-};
+use crate::{SLACalculatorContract, SLAError, RESULT_SCHEMA_VERSION, STORAGE_VERSION};
 
 /// Schema version of the `ContractInfo` struct itself.
 /// Increment when fields are added, removed, or reordered.
@@ -41,7 +39,7 @@ pub const CONTRACT_INFO_SCHEMA_VERSION: u32 = 1;
 /// |-------|-------------|
 /// | `schema_version` | Version of this `ContractInfo` struct (bumped on schema changes) |
 /// | `contract_name` | Human-readable contract name for log correlation |
-/// | `contract_version` | Crate version exposed as a Symbol (e.g. "0.1.0") |
+/// | `contract_version` | Crate version exposed as a Symbol (e.g. "0_1_0") |
 /// | `storage_version` | Current on-chain storage schema version |
 /// | `result_schema_version` | SLAResult encoding schema version |
 /// | `event_version` | Canonical event version symbol (e.g. "v1") |
@@ -50,6 +48,7 @@ pub const CONTRACT_INFO_SCHEMA_VERSION: u32 = 1;
 /// | `is_config_frozen` | True when configuration is frozen |
 /// | `supported_severities` | Canonical severity Symbols in canonical order |
 /// | `features` | Feature flags enabled on this contract |
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContractInfo {
@@ -92,11 +91,7 @@ pub fn get_contract_info(env: &Env) -> Result<ContractInfo, SLAError> {
         .get(&crate::STORAGE_VERSION_KEY)
         .unwrap_or(0);
     let needs_migration = stored_version != STORAGE_VERSION;
-    let is_paused: bool = env
-        .storage()
-        .instance()
-        .get(&crate::PAUSED_KEY)
-        .unwrap_or(false);
+    let is_paused: bool = env.storage().instance().get(&crate::PAUSED_KEY).unwrap_or(false);
 
     let is_config_frozen = crate::config_freeze::is_config_frozen(env);
 
@@ -113,12 +108,12 @@ pub fn get_contract_info(env: &Env) -> Result<ContractInfo, SLAError> {
     features.push_back(symbol_short!("ver_nego"));
     features.push_back(symbol_short!("corr_id"));
     features.push_back(symbol_short!("freeze"));
-    features.push_back(symbol_short!("ctrct_info"));
+    features.push_back(symbol_short!("ctrctinfo"));
 
     Ok(ContractInfo {
         schema_version: CONTRACT_INFO_SCHEMA_VERSION,
         contract_name: symbol_short!("sla_calc"),
-        contract_version: symbol_short!("0.1.0"),
+        contract_version: symbol_short!("0_1_0"),
         storage_version: STORAGE_VERSION,
         result_schema_version: RESULT_SCHEMA_VERSION,
         event_version: crate::event_schema::current_event_version(),
@@ -136,7 +131,7 @@ mod tests {
     use crate::SLACalculatorContract;
     use soroban_sdk::{testutils::Address as _, Address, Env, Symbol};
 
-    fn setup() -> (Env, Address, Address) {
+    fn setup() -> (Env, Address, Address, Address) {
         let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
@@ -144,88 +139,103 @@ mod tests {
         let operator = Address::generate(&env);
         // Initialize manually through storage since we don't have the client here
         env.as_contract(&contract_id, || {
-            crate::SLACalculatorContract::initialize(
-                env.clone(),
-                admin.clone(),
-                operator.clone(),
-            )
-            .unwrap();
+            crate::SLACalculatorContract::initialize(env.clone(), admin.clone(), operator.clone()).unwrap();
         });
-        (env, admin, operator)
+        (env, contract_id, admin, operator)
     }
 
     #[test]
     fn test_contract_info_available_after_init() {
-        let (env, _admin, _operator) = setup();
-        let info = get_contract_info(&env).expect("ContractInfo must be available after init");
-        assert_eq!(info.schema_version, CONTRACT_INFO_SCHEMA_VERSION);
-        assert_eq!(info.contract_name, symbol_short!("sla_calc"));
-        assert_eq!(info.contract_version, symbol_short!("0.1.0"));
-        assert_eq!(info.storage_version, STORAGE_VERSION);
-        assert_eq!(info.result_schema_version, RESULT_SCHEMA_VERSION);
-        assert_eq!(info.event_version, symbol_short!("v1"));
-        assert!(!info.needs_migration);
-        assert!(!info.is_paused);
-        assert!(!info.is_config_frozen);
+        let (env, contract_id, _admin, _operator) = setup();
+        env.as_contract(&contract_id, || {
+            let info = get_contract_info(&env).expect("ContractInfo must be available after init");
+            assert_eq!(info.schema_version, CONTRACT_INFO_SCHEMA_VERSION);
+            assert_eq!(info.contract_name, symbol_short!("sla_calc"));
+            assert_eq!(info.contract_version, symbol_short!("0_1_0"));
+            assert_eq!(info.storage_version, STORAGE_VERSION);
+            assert_eq!(info.result_schema_version, RESULT_SCHEMA_VERSION);
+            assert_eq!(info.event_version, symbol_short!("v1"));
+            assert!(!info.needs_migration);
+            assert!(!info.is_paused);
+            assert!(!info.is_config_frozen);
+        });
     }
 
     #[test]
     fn test_contract_info_has_canonical_severities() {
-        let (env, _admin, _operator) = setup();
-        let info = get_contract_info(&env).unwrap();
-        assert_eq!(info.supported_severities.len(), 4);
-        assert_eq!(info.supported_severities.get(0).unwrap(), symbol_short!("critical"));
-        assert_eq!(info.supported_severities.get(1).unwrap(), symbol_short!("high"));
-        assert_eq!(info.supported_severities.get(2).unwrap(), symbol_short!("medium"));
-        assert_eq!(info.supported_severities.get(3).unwrap(), symbol_short!("low"));
+        let (env, contract_id, _admin, _operator) = setup();
+        env.as_contract(&contract_id, || {
+            let info = get_contract_info(&env).unwrap();
+            assert_eq!(info.supported_severities.len(), 4);
+            assert_eq!(
+                info.supported_severities.get(0).unwrap(),
+                symbol_short!("critical")
+            );
+            assert_eq!(info.supported_severities.get(1).unwrap(), symbol_short!("high"));
+            assert_eq!(info.supported_severities.get(2).unwrap(), symbol_short!("medium"));
+            assert_eq!(info.supported_severities.get(3).unwrap(), symbol_short!("low"));
+        });
     }
 
     #[test]
     fn test_contract_info_has_features() {
-        let (env, _admin, _operator) = setup();
-        let info = get_contract_info(&env).unwrap();
-        assert!(info.features.len() >= 10);
-        // Verify key features are present
-        let feature_strs: Vec<Symbol> = info.features;
-        let has_calc = feature_strs.iter().any(|f| f == symbol_short!("calc"));
-        let has_pause = feature_strs.iter().any(|f| f == symbol_short!("pause"));
-        let has_ctrct_info = feature_strs.iter().any(|f| f == symbol_short!("ctrct_info"));
-        assert!(has_calc);
-        assert!(has_pause);
-        assert!(has_ctrct_info);
+        let (env, contract_id, _admin, _operator) = setup();
+        env.as_contract(&contract_id, || {
+            let info = get_contract_info(&env).unwrap();
+            assert!(info.features.len() >= 10);
+            // Verify key features are present
+            let feature_strs: Vec<Symbol> = info.features;
+            let has_calc = feature_strs.iter().any(|f| f == symbol_short!("calc"));
+            let has_pause = feature_strs.iter().any(|f| f == symbol_short!("pause"));
+            let has_ctrct_info = feature_strs.iter().any(|f| f == symbol_short!("ctrctinfo"));
+            assert!(has_calc);
+            assert!(has_pause);
+            assert!(has_ctrct_info);
+        });
     }
 
     #[test]
     fn test_contract_info_reflects_pause_state() {
-        let (env, admin, _operator) = setup();
-        // Pause the contract
-        crate::metadata::pause(
-            &env,
-            &admin,
-            soroban_sdk::String::from_str(&env, "testing"),
-        )
-        .unwrap();
+        let (env, contract_id, admin, _operator) = setup();
+        // Pause the contract from the contract's own storage context
+        env.as_contract(&contract_id, || {
+            crate::metadata::pause(&env, &admin, soroban_sdk::String::from_str(&env, "testing")).unwrap();
+        });
 
-        let info = get_contract_info(&env).unwrap();
-        assert!(info.is_paused);
+        env.as_contract(&contract_id, || {
+            let info = get_contract_info(&env).unwrap();
+            assert!(info.is_paused);
+        });
 
         // Unpause and verify
-        crate::metadata::unpause(&env, &admin).unwrap();
-        let info2 = get_contract_info(&env).unwrap();
-        assert!(!info2.is_paused);
+        env.as_contract(&contract_id, || {
+            crate::metadata::unpause(&env, &admin).unwrap();
+        });
+        env.as_contract(&contract_id, || {
+            let info2 = get_contract_info(&env).unwrap();
+            assert!(!info2.is_paused);
+        });
     }
 
     #[test]
     fn test_contract_info_reflects_freeze_state() {
-        let (env, admin, _operator) = setup();
+        let (env, contract_id, _admin, _operator) = setup();
 
-        crate::config_freeze::freeze_config(&env);
-        let info = get_contract_info(&env).unwrap();
-        assert!(info.is_config_frozen);
+        env.as_contract(&contract_id, || {
+            crate::config_freeze::freeze_config(&env);
+        });
+        env.as_contract(&contract_id, || {
+            let info = get_contract_info(&env).unwrap();
+            assert!(info.is_config_frozen);
+        });
 
-        crate::config_freeze::unfreeze_config(&env);
-        let info2 = get_contract_info(&env).unwrap();
-        assert!(!info2.is_config_frozen);
+        env.as_contract(&contract_id, || {
+            crate::config_freeze::unfreeze_config(&env);
+        });
+        env.as_contract(&contract_id, || {
+            let info2 = get_contract_info(&env).unwrap();
+            assert!(!info2.is_config_frozen);
+        });
     }
 
     #[test]
@@ -237,32 +247,29 @@ mod tests {
         let operator = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            crate::SLACalculatorContract::initialize(
-                env.clone(),
-                admin.clone(),
-                operator.clone(),
-            )
-            .unwrap();
+            crate::SLACalculatorContract::initialize(env.clone(), admin.clone(), operator.clone()).unwrap();
 
             // After init, should not need migration
             let info = get_contract_info(&env).unwrap();
             assert!(!info.needs_migration);
 
-            // Corrupt the stored version
-            env.storage()
-                .instance()
-                .set(&crate::STORAGE_VERSION_KEY, &99u32);
+            // Corrupt the stored version: get_contract_info must now surface
+            // an explicit VersionMismatch error (the contract reports that it
+            // needs migration instead of returning stale metadata).
+            env.storage().instance().set(&crate::STORAGE_VERSION_KEY, &99u32);
 
-            let info2 = get_contract_info(&env).unwrap();
-            assert!(info2.needs_migration);
+            let err = get_contract_info(&env).unwrap_err();
+            assert_eq!(err, crate::SLAError::VersionMismatch);
         });
     }
 
     #[test]
     fn test_contract_info_is_deterministic() {
-        let (env, _admin, _operator) = setup();
-        let info1 = get_contract_info(&env).unwrap();
-        let info2 = get_contract_info(&env).unwrap();
-        assert_eq!(info1, info2);
+        let (env, contract_id, _admin, _operator) = setup();
+        env.as_contract(&contract_id, || {
+            let info1 = get_contract_info(&env).unwrap();
+            let info2 = get_contract_info(&env).unwrap();
+            assert_eq!(info1, info2);
+        });
     }
 }

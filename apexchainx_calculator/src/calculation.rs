@@ -304,7 +304,8 @@ fn set_count_lane(packed: u128, index: u32, value: u32) -> u128 {
 ///   Instead, reset is triggered on the next `calculate_sla` invocation for that specific severity lane once 7 days have passed.
 /// - **Lane Isolation**: Reset is per-severity lane. Calculations or inactivity in one severity level do not reset telemetry for other severities.
 /// - **Reinitialization**: Upon reset, the lane's calculation and violation counters are cleared to 0 before the current invocation is recorded,
-///   reinitializing the count to 1 calculation (and 1 violation if the current calculation violated SLA).pub fn record_severity_telemetry(env: &Env, severity: &Symbol, met: bool) {
+///   reinitializing the count to 1 calculation (and 1 violation if the current calculation violated SLA).
+pub fn record_severity_telemetry(env: &Env, severity: &Symbol, met: bool) {
     let index = crate::SLACalculatorContract::canonical_severity_index(severity).unwrap_or(0);
     let mut calculations = load_counts(env, &SEVERITY_CALC_COUNTS_KEY);
     let mut violations = load_counts(env, &SEVERITY_VIOL_COUNTS_KEY);

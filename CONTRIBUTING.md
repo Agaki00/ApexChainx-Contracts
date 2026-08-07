@@ -380,7 +380,7 @@ Before opening a PR, consult the **[Module Ownership Map](docs/MODULE_OWNERSHIP.
 - [ ] `cargo clippy -- -D warnings` produces no warnings
 - [ ] `cargo fmt -- --check` confirms formatting compliance
 - [ ] `cargo machete` passes (no unused dependencies in `Cargo.toml`)
-- [ ] `cargo +nightly udeps --all-targets` passes (no unused dependencies in code; requires nightly toolchain)
+- [ ] `cargo +nightly-2026-02-01 udeps --all-targets` passes (no unused dependencies in code; requires pinned nightly toolchain)
 - [ ] `cargo check --target wasm32-unknown-unknown --lib` passes (no-std check)
 - [ ] New public functions are added to the result schema or documented
 - [ ] Any breaking change to `SLAResult` increments `RESULT_SCHEMA_VERSION`
@@ -486,13 +486,16 @@ unused dependencies will fail CI.
 cargo install cargo-machete --locked
 cargo install cargo-udeps --locked
 
-# Ensure the nightly toolchain is available (required by cargo-udeps)
-rustup toolchain install nightly
+# Ensure the nightly toolchain is available (required by cargo-udeps).
+# Pin nightly-2026-02-01: newer nightlies (>= 1.96) reject ethnum 1.5.0's
+# transmute-based conversions (TryFromIntError is no longer zero-sized),
+# which would break the udeps build.
+rustup toolchain install nightly-2026-02-01 --component rust-src
 
 # Check for unused dependencies
 cd apexchainx_calculator
 cargo machete
-cargo +nightly udeps --all-targets
+cargo +nightly-2026-02-01 udeps --all-targets
 ```
 
 Or use the `just` recipes (see [`justfile`](justfile)):
@@ -514,7 +517,8 @@ just ci
 >
 > **Note:** `cargo-udeps` uses nightly-only compiler features, so it requires
 > the nightly Rust toolchain. The `just udeps` recipe handles this automatically
-> by invoking `cargo +nightly udeps`.
+> by invoking `cargo +nightly-2026-02-01 udeps` (pinned for ethnum 1.5.0
+> compatibility — see the recipe comment).
 
 ## 📚 Documentation Guidelines
 

@@ -38,10 +38,7 @@
 
 #![cfg(test)]
 
-use crate::{
-    calculation::compute_result,
-    SLAConfig,
-};
+use crate::{calculation::compute_result, SLAConfig};
 use soroban_sdk::{Env, Symbol};
 
 // ─── Sentinel values ────────────────────────────────────────────────────────
@@ -193,7 +190,6 @@ const PARITY_VECTORS: &[ParityVector] = &[
         expected_rating: "poor",
         expected_amount: -1500,
     },
-
     // ── high (threshold=30, penalty=50/min, reward_base=750) ──────────────
 
     // MTTR 0 — ratio 0% → top
@@ -300,7 +296,6 @@ const PARITY_VECTORS: &[ParityVector] = &[
         expected_rating: "poor",
         expected_amount: -1500,
     },
-
     // ── medium (threshold=60, penalty=25/min, reward_base=750) ────────────
 
     // MTTR 0 → top
@@ -407,7 +402,6 @@ const PARITY_VECTORS: &[ParityVector] = &[
         expected_rating: "poor",
         expected_amount: -1500,
     },
-
     // ── low (threshold=120, penalty=10/min, reward_base=600) ─────────────
 
     // MTTR 0 → top
@@ -567,42 +561,51 @@ fn parity_check_all_canonical_vectors() {
         if result.status != want_status {
             failures.push(alloc::format!(
                 "[parity] case '{}': status expected '{}', got symbol (check source)",
-                v.case_id, v.expected_status
+                v.case_id,
+                v.expected_status
             ));
             case_ok = false;
         }
         if result.payment_type != want_payment {
             failures.push(alloc::format!(
                 "[parity] case '{}': payment_type expected '{}', got symbol (check source)",
-                v.case_id, v.expected_payment_type
+                v.case_id,
+                v.expected_payment_type
             ));
             case_ok = false;
         }
         if result.rating != want_rating {
             failures.push(alloc::format!(
                 "[parity] case '{}': rating expected '{}', got symbol (check source)",
-                v.case_id, v.expected_rating
+                v.case_id,
+                v.expected_rating
             ));
             case_ok = false;
         }
         if result.amount != v.expected_amount {
             failures.push(alloc::format!(
                 "[parity] case '{}': amount expected {}, got {}",
-                v.case_id, v.expected_amount, result.amount
+                v.case_id,
+                v.expected_amount,
+                result.amount
             ));
             case_ok = false;
         }
         if result.mttr_minutes != v.mttr_minutes {
             failures.push(alloc::format!(
                 "[parity] case '{}': mttr_minutes expected {}, got {}",
-                v.case_id, v.mttr_minutes, result.mttr_minutes
+                v.case_id,
+                v.mttr_minutes,
+                result.mttr_minutes
             ));
             case_ok = false;
         }
         if result.threshold_minutes != v.threshold_minutes {
             failures.push(alloc::format!(
                 "[parity] case '{}': threshold_minutes expected {}, got {}",
-                v.case_id, v.threshold_minutes, result.threshold_minutes
+                v.case_id,
+                v.threshold_minutes,
+                result.threshold_minutes
             ));
             case_ok = false;
         }

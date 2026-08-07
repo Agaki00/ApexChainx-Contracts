@@ -82,13 +82,18 @@ jobs:
         working-directory: apexchainx_calculator
         run: cargo clippy --all-targets -- -D warnings
 
+      # cargo-udeps requires a nightly toolchain (see CONTRIBUTING.md), while
+      # this job otherwise pins stable 1.94.1. Pin a nightly from the same era:
+      # newer nightlies (>= 1.96) reject ethnum 1.5.0's transmute-based
+      # conversions (TryFromIntError is no longer zero-sized), breaking this gate.
       - name: Unused dependency gate
         working-directory: apexchainx_calculator
         run: |
           cargo install cargo-machete --locked
           cargo install cargo-udeps --locked
+          rustup toolchain install nightly-2026-02-01 --component rust-src
           cargo machete
-          cargo udeps --all-targets
+          cargo +nightly-2026-02-01 udeps --all-targets
 
       - name: Build native
         working-directory: apexchainx_calculator
@@ -140,7 +145,9 @@ jobs:
   fuzz-tests:
     name: Fuzz Tests (proptest)
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    # Cold builds (first run without cache) need more than 2 minutes; the
+    # proptest cases themselves run quickly once compiled.
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
@@ -155,14 +162,14 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            apexchainx_calculator/target
+            target
           key: fuzz-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             fuzz-${{ runner.os }}-cargo-
 
       - name: Run property-based fuzz tests
         working-directory: apexchainx_calculator
-        run: cargo test --lib fuzz_tests::
+        run: "cargo test --lib fuzz_tests::"
 
   release-tests:
     name: Release Tests (#90)
@@ -182,7 +189,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            apexchainx_calculator/target
+            target
           key: release-test-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             release-test-${{ runner.os }}-cargo-
@@ -214,14 +221,14 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            apexchainx_calculator/target
+            target
           key: parity-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             parity-${{ runner.os }}-cargo-
 
       - name: Run parity checker against canonical baseline
         working-directory: apexchainx_calculator
-        run: cargo test --lib parity_tests::
+        run: "cargo test --lib parity_tests::"
 
       - name: Upload parity baseline as artifact (for release traceability)
         uses: actions/upload-artifact@v4
@@ -253,17 +260,9 @@ jobs:
       - name: Verify hash against committed file
         run: just hash-verify
         continue-on-error: true
-      - name: Generate hash
-        run: |
-          WASM=apexchainx_calculator/target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
-          if [ -f "$WASM" ]; then
-            sha256sum "$WASM" | awk '{print $1 "  apexchainx_calculator.wasm"}' > provenance.sha256
-            echo "Hash generated successfully"
-            cat provenance.sha256
-          else
-            echo "WASM file not found at $WASM"
-            exit 1
-          fi
+      # `just hash-save` above already writes the hash to
+      # artifacts/apexchainx_calculator.wasm.sha256, which the upload step
+      # below publishes. No additional generation step is needed.
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

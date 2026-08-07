@@ -1,17 +1,20 @@
 #![cfg(test)]
 
 use super::*;
+use crate::audit_state::AuditState;
+use crate::config_bundle::ConfigBundle;
+use crate::cross_contract_safety::CompensationAction;
+use crate::event::CalculationExecutedEventV1;
+use crate::metrics::retention_stats::HistoryRetentionMetrics;
+use crate::version_negotiation::{
+    NegotiationOutcome, VersionMismatchDetail, VersionNegotiationInfo, VersionNegotiationResult,
+};
 use alloc::format;
+use alloc::string::ToString;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
 use soroban_sdk::testutils::Ledger as _;
 use soroban_sdk::{Env, Symbol, TryIntoVal};
-use crate::metrics::retention_stats::HistoryRetentionMetrics;
-use crate::config_bundle::ConfigBundle;
-use crate::version_negotiation::{VersionNegotiationInfo, NegotiationOutcome, VersionMismatchDetail, VersionNegotiationResult};
-use crate::audit_state::AuditState;
-use crate::event::CalculationExecutedEventV1;
-use crate::cross_contract_safety::CompensationAction;
 
 // ============================================================
 // Test helpers
@@ -6829,7 +6832,11 @@ fn test_239_severity_aliases_field_exists_and_empty_in_v1() {
     let (_env, client, _actors) = setup();
     let schema = client.get_result_schema();
     // #239 – severity_aliases field must be present for future deprecations
-    assert_eq!(schema.severity_aliases.len(), 0, "No severity aliases deprecated in v1");
+    assert_eq!(
+        schema.severity_aliases.len(),
+        0,
+        "No severity aliases deprecated in v1"
+    );
 }
 
 #[test]
@@ -7471,6 +7478,10 @@ fn test_healthcheck_is_deterministic() {
     let (_env, client, _actors) = setup();
     let a = client.healthcheck();
     let b = client.healthcheck();
+    assert_eq!(a, b);
+}
+
+// ============================================================
 // #194 – get_result_schema coverage test with migration notes guard
 // ============================================================
 //
@@ -7488,8 +7499,7 @@ fn test_get_result_schema_matches_expected_constant() {
     let (_env, client, _actors) = setup();
     let schema = client.get_result_schema();
     assert_eq!(
-        schema.schema_version,
-        RESULT_SCHEMA_VERSION,
+        schema.schema_version, RESULT_SCHEMA_VERSION,
         "RESULT_SCHEMA_VERSION mismatch. Update migration notes and bump constant!"
     );
 }
@@ -7498,7 +7508,8 @@ fn test_get_result_schema_matches_expected_constant() {
 fn test_get_result_schema_is_deterministic() {
     let (_env, client, _actors) = setup();
     let a = client.get_result_schema();
-    let b = client.get_result_schema();    assert_eq!(a, b);
+    let b = client.get_result_schema();
+    assert_eq!(a, b);
 }
 
 #[test]
@@ -7536,7 +7547,7 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
         penalty_per_minute: 100,
         reward_base: 750,
     };
-    let scval_config = sla_config.clone().try_into_val(&env).unwrap();
+    let scval_config: soroban_sdk::Val = sla_config.clone().try_into_val(&env).unwrap();
     let restored_config: SLAConfig = scval_config.try_into_val(&env).unwrap();
     assert_eq!(sla_config, restored_config, "SLAConfig round-trip failed");
 
@@ -7552,7 +7563,7 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
         config_version_hash: 12345,
         recorded_at: 1700000000,
     };
-    let scval_result = sla_result.clone().try_into_val(&env).unwrap();
+    let scval_result: soroban_sdk::Val = sla_result.clone().try_into_val(&env).unwrap();
     let restored_result: SLAResult = scval_result.try_into_val(&env).unwrap();
     assert_eq!(sla_result, restored_result, "SLAResult round-trip failed");
 
@@ -7565,7 +7576,7 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
             reward_base: 750,
         },
     };
-    let scval_entry = config_entry.clone().try_into_val(&env).unwrap();
+    let scval_entry: soroban_sdk::Val = config_entry.clone().try_into_val(&env).unwrap();
     let restored_entry: SLAConfigEntry = scval_entry.try_into_val(&env).unwrap();
     assert_eq!(config_entry, restored_entry, "SLAConfigEntry round-trip failed");
 
@@ -7583,16 +7594,20 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
         version: symbol_short!("v1"),
         entries,
     };
-    let scval_snapshot = config_snapshot.clone().try_into_val(&env).unwrap();
+    let scval_snapshot: soroban_sdk::Val = config_snapshot.clone().try_into_val(&env).unwrap();
     let restored_snapshot: SLAConfigSnapshot = scval_snapshot.try_into_val(&env).unwrap();
-    assert_eq!(config_snapshot, restored_snapshot, "SLAConfigSnapshot round-trip failed");
+    assert_eq!(
+        config_snapshot, restored_snapshot,
+        "SLAConfigSnapshot round-trip failed"
+    );
 
     // Test SLAResultSchema
-    let mut deprecated_symbols = Vec::new(&env);
-    let mut severity_aliases = Vec::new(&env);
+    let deprecated_symbols = Vec::new(&env);
+    let severity_aliases = Vec::new(&env);
     let result_schema = SLAResultSchema {
         version: symbol_short!("v1"),
         schema_version: 1,
+        result_field_count: RESULT_SCHEMA_FIELD_COUNT,
         status_met: symbol_short!("met"),
         status_violated: symbol_short!("viol"),
         payment_reward: symbol_short!("rew"),
@@ -7605,9 +7620,12 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
         deprecated_symbols,
         severity_aliases,
     };
-    let scval_schema = result_schema.clone().try_into_val(&env).unwrap();
+    let scval_schema: soroban_sdk::Val = result_schema.clone().try_into_val(&env).unwrap();
     let restored_schema: SLAResultSchema = scval_schema.try_into_val(&env).unwrap();
-    assert_eq!(result_schema, restored_schema, "SLAResultSchema round-trip failed");
+    assert_eq!(
+        result_schema, restored_schema,
+        "SLAResultSchema round-trip failed"
+    );
 
     // Test DeprecatedSymbol
     let deprecated_symbol = DeprecatedSymbol {
@@ -7616,9 +7634,12 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
         deprecated_at: 1,
         removal_version: Some(2),
     };
-    let scval_deprecated = deprecated_symbol.clone().try_into_val(&env).unwrap();
+    let scval_deprecated: soroban_sdk::Val = deprecated_symbol.clone().try_into_val(&env).unwrap();
     let restored_deprecated: DeprecatedSymbol = scval_deprecated.try_into_val(&env).unwrap();
-    assert_eq!(deprecated_symbol, restored_deprecated, "DeprecatedSymbol round-trip failed");
+    assert_eq!(
+        deprecated_symbol, restored_deprecated,
+        "DeprecatedSymbol round-trip failed"
+    );
 
     // Test SeverityAliasMapping
     let alias_mapping = SeverityAliasMapping {
@@ -7627,21 +7648,24 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
         deprecated_at: 2,
         removal_version: None,
     };
-    let scval_alias = alias_mapping.clone().try_into_val(&env).unwrap();
+    let scval_alias: soroban_sdk::Val = alias_mapping.clone().try_into_val(&env).unwrap();
     let restored_alias: SeverityAliasMapping = scval_alias.try_into_val(&env).unwrap();
-    assert_eq!(alias_mapping, restored_alias, "SeverityAliasMapping round-trip failed");
+    assert_eq!(
+        alias_mapping, restored_alias,
+        "SeverityAliasMapping round-trip failed"
+    );
 
     // Test ContractMetadata
     let mut supported_severities = Vec::new(&env);
     supported_severities.push_back(symbol_short!("critical"));
     let metadata = ContractMetadata {
-        contract_name: symbol_short!("apexchainx_calculator"),
+        contract_name: symbol_short!("sla_calc"),
         storage_version: 1,
         result_schema_version: 1,
         supported_severities,
         features: Vec::new(&env),
     };
-    let scval_metadata = metadata.clone().try_into_val(&env).unwrap();
+    let scval_metadata: soroban_sdk::Val = metadata.clone().try_into_val(&env).unwrap();
     let restored_metadata: ContractMetadata = scval_metadata.try_into_val(&env).unwrap();
     assert_eq!(metadata, restored_metadata, "ContractMetadata round-trip failed");
 
@@ -7652,7 +7676,7 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
         total_rewards: 50000,
         total_penalties: -2500,
     };
-    let scval_stats = stats.clone().try_into_val(&env).unwrap();
+    let scval_stats: soroban_sdk::Val = stats.clone().try_into_val(&env).unwrap();
     let restored_stats: SLAStats = scval_stats.try_into_val(&env).unwrap();
     assert_eq!(stats, restored_stats, "SLAStats round-trip failed");
 
@@ -7660,73 +7684,84 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
     let severity_exposure = SeverityExposure {
         severity: symbol_short!("critical"),
         max_reward: 750,
-        max_penalty: -500,
-        threshold_minutes: 30,
+        penalty_per_minute: 100,
     };
-    let scval_exposure = severity_exposure.clone().try_into_val(&env).unwrap();
+    let scval_exposure: soroban_sdk::Val = severity_exposure.clone().try_into_val(&env).unwrap();
     let restored_exposure: SeverityExposure = scval_exposure.try_into_val(&env).unwrap();
-    assert_eq!(severity_exposure, restored_exposure, "SeverityExposure round-trip failed");
+    assert_eq!(
+        severity_exposure, restored_exposure,
+        "SeverityExposure round-trip failed"
+    );
 
     // Test EconomicExposure
     let mut breakdown = Vec::new(&env);
     breakdown.push_back(SeverityExposure {
         severity: symbol_short!("critical"),
         max_reward: 750,
-        max_penalty: -500,
-        threshold_minutes: 30,
+        penalty_per_minute: 100,
     });
     let economic_exposure = EconomicExposure {
-        max_total_reward: 750,
-        max_total_penalty: -500,
+        total_max_reward: 750,
+        total_penalty_per_minute: 100,
         breakdown,
     };
-    let scval_economic = economic_exposure.clone().try_into_val(&env).unwrap();
+    let scval_economic: soroban_sdk::Val = economic_exposure.clone().try_into_val(&env).unwrap();
     let restored_economic: EconomicExposure = scval_economic.try_into_val(&env).unwrap();
-    assert_eq!(economic_exposure, restored_economic, "EconomicExposure round-trip failed");
+    assert_eq!(
+        economic_exposure, restored_economic,
+        "EconomicExposure round-trip failed"
+    );
 
     // Test SeverityTelemetry
     let telemetry = SeverityTelemetry {
         severity: symbol_short!("critical"),
-        violation_rate_bps: 500,
+        calculations: 1000,
+        violations: 50,
+        violation_rate: 500,
     };
-    let scval_telemetry = telemetry.clone().try_into_val(&env).unwrap();
+    let scval_telemetry: soroban_sdk::Val = telemetry.clone().try_into_val(&env).unwrap();
     let restored_telemetry: SeverityTelemetry = scval_telemetry.try_into_val(&env).unwrap();
-    assert_eq!(telemetry, restored_telemetry, "SeverityTelemetry round-trip failed");
+    assert_eq!(
+        telemetry, restored_telemetry,
+        "SeverityTelemetry round-trip failed"
+    );
 
     // Test PauseInfo
     let pause_info = PauseInfo {
         reason: String::from_str(&env, "test pause"),
-        paused_at: Some(1700000000),
+        paused_at: 1700000000,
+        paused_by: soroban_sdk::Address::generate(&env),
     };
-    let scval_pause = pause_info.clone().try_into_val(&env).unwrap();
+    let scval_pause: soroban_sdk::Val = pause_info.clone().try_into_val(&env).unwrap();
     let restored_pause: PauseInfo = scval_pause.try_into_val(&env).unwrap();
     assert_eq!(pause_info, restored_pause, "PauseInfo round-trip failed");
 
     // Test ConfigUpdateInfo
-    let update_info = ConfigUpdateInfo {
-        sequence: 12345,
-    };
-    let scval_update = update_info.clone().try_into_val(&env).unwrap();
+    let update_info = ConfigUpdateInfo { sequence: 12345 };
+    let scval_update: soroban_sdk::Val = update_info.clone().try_into_val(&env).unwrap();
     let restored_update: ConfigUpdateInfo = scval_update.try_into_val(&env).unwrap();
     assert_eq!(update_info, restored_update, "ConfigUpdateInfo round-trip failed");
 
     // Test StorageVersionInfo
     let version_info = StorageVersionInfo {
-        storage_version: 1,
-        result_schema_version: 1,
+        stored_version: 1,
+        expected_version: 1,
         needs_migration: false,
     };
-    let scval_version = version_info.clone().try_into_val(&env).unwrap();
+    let scval_version: soroban_sdk::Val = version_info.clone().try_into_val(&env).unwrap();
     let restored_version: StorageVersionInfo = scval_version.try_into_val(&env).unwrap();
-    assert_eq!(version_info, restored_version, "StorageVersionInfo round-trip failed");
+    assert_eq!(
+        version_info, restored_version,
+        "StorageVersionInfo round-trip failed"
+    );
 
     // Test FailureCode
     let failure_code = FailureCode {
         code: 1,
-        label: symbol_short!("test_error"),
-        description: String::from_str(&env, "Test error description"),
+        label: symbol_short!("test_err"),
+        description: symbol_short!("test_desc"),
     };
-    let scval_failure = failure_code.clone().try_into_val(&env).unwrap();
+    let scval_failure: soroban_sdk::Val = failure_code.clone().try_into_val(&env).unwrap();
     let restored_failure: FailureCode = scval_failure.try_into_val(&env).unwrap();
     assert_eq!(failure_code, restored_failure, "FailureCode round-trip failed");
 
@@ -7734,35 +7769,47 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
     let mut codes = Vec::new(&env);
     codes.push_back(FailureCode {
         code: 1,
-        label: symbol_short!("test_error"),
-        description: String::from_str(&env, "Test error description"),
+        label: symbol_short!("test_err"),
+        description: symbol_short!("test_desc"),
     });
     let failure_schema = FailureSchema {
         version: symbol_short!("v1"),
-        schema_version: 1,
         codes,
     };
-    let scval_failure_schema = failure_schema.clone().try_into_val(&env).unwrap();
+    let scval_failure_schema: soroban_sdk::Val = failure_schema.clone().try_into_val(&env).unwrap();
     let restored_failure_schema: FailureSchema = scval_failure_schema.try_into_val(&env).unwrap();
-    assert_eq!(failure_schema, restored_failure_schema, "FailureSchema round-trip failed");
+    assert_eq!(
+        failure_schema, restored_failure_schema,
+        "FailureSchema round-trip failed"
+    );
 
     // Test HealthcheckResult
     let healthcheck = HealthcheckResult {
-        healthy: true,
+        ready: true,
+        contract_name: symbol_short!("sla_calc"),
+        status: symbol_short!("ok"),
     };
-    let scval_healthcheck = healthcheck.clone().try_into_val(&env).unwrap();
+    let scval_healthcheck: soroban_sdk::Val = healthcheck.clone().try_into_val(&env).unwrap();
     let restored_healthcheck: HealthcheckResult = scval_healthcheck.try_into_val(&env).unwrap();
-    assert_eq!(healthcheck, restored_healthcheck, "HealthcheckResult round-trip failed");
+    assert_eq!(
+        healthcheck, restored_healthcheck,
+        "HealthcheckResult round-trip failed"
+    );
 
     // Test VersionInfo
     let version_info = VersionInfo {
         storage_version: 1,
         result_schema_version: 1,
+        needs_migration: false,
         is_paused: false,
+        contract_name: symbol_short!("sla_calc"),
     };
-    let scval_version_info = version_info.clone().try_into_val(&env).unwrap();
+    let scval_version_info: soroban_sdk::Val = version_info.clone().try_into_val(&env).unwrap();
     let restored_version_info: VersionInfo = scval_version_info.try_into_val(&env).unwrap();
-    assert_eq!(version_info, restored_version_info, "VersionInfo round-trip failed");
+    assert_eq!(
+        version_info, restored_version_info,
+        "VersionInfo round-trip failed"
+    );
 
     // Test HistoryRetentionMetrics
     let retention_metrics = HistoryRetentionMetrics {
@@ -7773,9 +7820,12 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
         total_entries: 1000,
         retention_ratio_bps: 8000,
     };
-    let scval_retention = retention_metrics.clone().try_into_val(&env).unwrap();
+    let scval_retention: soroban_sdk::Val = retention_metrics.clone().try_into_val(&env).unwrap();
     let restored_retention: HistoryRetentionMetrics = scval_retention.try_into_val(&env).unwrap();
-    assert_eq!(retention_metrics, restored_retention, "HistoryRetentionMetrics round-trip failed");
+    assert_eq!(
+        retention_metrics, restored_retention,
+        "HistoryRetentionMetrics round-trip failed"
+    );
 
     // Test ConfigBundle
     let mut entries = Vec::new(&env);
@@ -7787,8 +7837,8 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
             reward_base: 750,
         },
     });
-    let mut deprecated_symbols = Vec::new(&env);
-    let mut severity_aliases = Vec::new(&env);
+    let deprecated_symbols = Vec::new(&env);
+    let severity_aliases = Vec::new(&env);
     let config_bundle = ConfigBundle {
         snapshot: SLAConfigSnapshot {
             version: symbol_short!("v1"),
@@ -7797,6 +7847,7 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
         schema: SLAResultSchema {
             version: symbol_short!("v1"),
             schema_version: 1,
+            result_field_count: RESULT_SCHEMA_FIELD_COUNT,
             status_met: symbol_short!("met"),
             status_violated: symbol_short!("viol"),
             payment_reward: symbol_short!("rew"),
@@ -7810,47 +7861,58 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
             severity_aliases,
         },
     };
-    let scval_bundle = config_bundle.clone().try_into_val(&env).unwrap();
+    let scval_bundle: soroban_sdk::Val = config_bundle.clone().try_into_val(&env).unwrap();
     let restored_bundle: ConfigBundle = scval_bundle.try_into_val(&env).unwrap();
     assert_eq!(config_bundle, restored_bundle, "ConfigBundle round-trip failed");
 
     // Test VersionNegotiationInfo
     let version_info = VersionNegotiationInfo {
-        contract_name: String::from_str(&env, "test_contract"),
-        major: 1,
-        minor: 0,
-        patch: 0,
+        contract_name: symbol_short!("sla_calc"),
+        protocol_version: 1,
+        storage_version: 1,
+        min_compatible_protocol: 1,
+        is_paused: false,
+        needs_migration: false,
     };
-    let scval_version_info = version_info.clone().try_into_val(&env).unwrap();
+    let scval_version_info: soroban_sdk::Val = version_info.clone().try_into_val(&env).unwrap();
     let restored_version_info: VersionNegotiationInfo = scval_version_info.try_into_val(&env).unwrap();
-    assert_eq!(version_info, restored_version_info, "VersionNegotiationInfo round-trip failed");
+    assert_eq!(
+        version_info, restored_version_info,
+        "VersionNegotiationInfo round-trip failed"
+    );
 
     // Test NegotiationOutcome
     let outcome = NegotiationOutcome::Compatible;
-    let scval_outcome = outcome.clone().try_into_val(&env).unwrap();
+    let scval_outcome: soroban_sdk::Val = outcome.clone().try_into_val(&env).unwrap();
     let restored_outcome: NegotiationOutcome = scval_outcome.try_into_val(&env).unwrap();
     assert_eq!(outcome, restored_outcome, "NegotiationOutcome round-trip failed");
 
     // Test VersionMismatchDetail
     let mismatch_detail = VersionMismatchDetail {
-        contract_name: String::from_str(&env, "test_contract"),
-        current_version: String::from_str(&env, "1.0.0"),
-        required_min: String::from_str(&env, "1.1.0"),
-        required_max: String::from_str(&env, "2.0.0"),
+        contract_name: symbol_short!("sla_calc"),
+        reported_protocol: 1,
+        required_min: 1,
     };
-    let scval_mismatch = mismatch_detail.clone().try_into_val(&env).unwrap();
+    let scval_mismatch: soroban_sdk::Val = mismatch_detail.clone().try_into_val(&env).unwrap();
     let restored_mismatch: VersionMismatchDetail = scval_mismatch.try_into_val(&env).unwrap();
-    assert_eq!(mismatch_detail, restored_mismatch, "VersionMismatchDetail round-trip failed");
+    assert_eq!(
+        mismatch_detail, restored_mismatch,
+        "VersionMismatchDetail round-trip failed"
+    );
 
     // Test VersionNegotiationResult
-    let mut details = Vec::new(&env);
+    let mismatches = Vec::new(&env);
     let negotiation_result = VersionNegotiationResult {
         outcome: NegotiationOutcome::Compatible,
-        details,
+        summary: symbol_short!("ok"),
+        mismatches,
     };
-    let scval_negotiation = negotiation_result.clone().try_into_val(&env).unwrap();
+    let scval_negotiation: soroban_sdk::Val = negotiation_result.clone().try_into_val(&env).unwrap();
     let restored_negotiation: VersionNegotiationResult = scval_negotiation.try_into_val(&env).unwrap();
-    assert_eq!(negotiation_result, restored_negotiation, "VersionNegotiationResult round-trip failed");
+    assert_eq!(
+        negotiation_result, restored_negotiation,
+        "VersionNegotiationResult round-trip failed"
+    );
 
     // Test AuditState
     let admin = Address::generate(&env);
@@ -7859,7 +7921,8 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
     let mut pause_info = Vec::new(&env);
     pause_info.push_back(PauseInfo {
         reason: String::from_str(&env, "test pause"),
-        paused_at: Some(1700000000),
+        paused_at: 1700000000,
+        paused_by: soroban_sdk::Address::generate(&env),
     });
     let mut config_entries = Vec::new(&env);
     config_entries.push_back(SLAConfigEntry {
@@ -7873,6 +7936,7 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
     let audit_state = AuditState {
         admin: admin.clone(),
         operator: operator.clone(),
+        pending_admin: None,
         pending_operator,
         paused: true,
         pause_info,
@@ -7886,27 +7950,53 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
             total_rewards: 50000,
             total_penalties: -2500,
         },
+        history_len: 0,
+        result_schema: SLAResultSchema {
+            version: symbol_short!("v1"),
+            schema_version: 1,
+            result_field_count: RESULT_SCHEMA_FIELD_COUNT,
+            status_met: symbol_short!("met"),
+            status_violated: symbol_short!("viol"),
+            payment_reward: symbol_short!("rew"),
+            payment_penalty: symbol_short!("pen"),
+            rating_exceptional: symbol_short!("top"),
+            rating_excellent: symbol_short!("excel"),
+            rating_good: symbol_short!("good"),
+            rating_poor: symbol_short!("poor"),
+            includes_config_version_hash: true,
+            deprecated_symbols: Vec::new(&env),
+            severity_aliases: Vec::new(&env),
+        },
     };
-    let scval_audit = audit_state.clone().try_into_val(&env).unwrap();
+    let scval_audit: soroban_sdk::Val = audit_state.clone().try_into_val(&env).unwrap();
     let restored_audit: AuditState = scval_audit.try_into_val(&env).unwrap();
     assert_eq!(audit_state, restored_audit, "AuditState round-trip failed");
 
     // Test CalculationExecutedEventV1
     let event = CalculationExecutedEventV1 {
         input_key: symbol_short!("test_key"),
+        input_value: 5,
+        result_value: 1500,
+        timestamp: 1700000000,
     };
-    let scval_event = event.clone().try_into_val(&env).unwrap();
+    let scval_event: soroban_sdk::Val = event.clone().try_into_val(&env).unwrap();
     let restored_event: CalculationExecutedEventV1 = scval_event.try_into_val(&env).unwrap();
-    assert_eq!(event, restored_event, "CalculationExecutedEventV1 round-trip failed");
+    assert_eq!(
+        event, restored_event,
+        "CalculationExecutedEventV1 round-trip failed"
+    );
 
     // Test CompensationAction
     let compensation = CompensationAction {
-        compensation_tag: symbol_short!("test_comp"),
+        tag: symbol_short!("unlock"),
         args: Vec::new(&env),
     };
-    let scval_compensation = compensation.clone().try_into_val(&env).unwrap();
+    let scval_compensation: soroban_sdk::Val = compensation.clone().try_into_val(&env).unwrap();
     let restored_compensation: CompensationAction = scval_compensation.try_into_val(&env).unwrap();
-    assert_eq!(compensation, restored_compensation, "CompensationAction round-trip failed");
+    assert_eq!(
+        compensation, restored_compensation,
+        "CompensationAction round-trip failed"
+    );
 }
 
 // ============================================================
@@ -8071,8 +8161,17 @@ fn test_historical_parity_golden_results() {
 
     // Validate result schema stability
     let schema = client.get_result_schema();
-    assert_eq!(schema.schema_version, 1, "Result schema version changed — check migration notes");
-    assert_eq!(schema.deprecated_symbols.len(), 0, "Unexpected deprecated symbols in v1");
+    assert_eq!(
+        schema.schema_version, 1,
+        "Result schema version changed — check migration notes"
+    );
+    assert_eq!(
+        schema.deprecated_symbols.len(),
+        0,
+        "Unexpected deprecated symbols in v1"
+    );
+}
+
 // #264 – Failure catalog drift guard
 // ============================================================
 //
@@ -8123,9 +8222,7 @@ fn test_failure_catalog_matches_error_helpers() {
             SLAError::InvalidPenalty => error_responses::is_invalid_penalty(&err),
             SLAError::InvalidReward => error_responses::is_invalid_reward(&err),
             SLAError::InvalidSeverity => error_responses::is_invalid_severity(&err),
-            SLAError::RetentionLimitOutOfRange => {
-                error_responses::is_retention_limit_out_of_range(&err)
-            }
+            SLAError::RetentionLimitOutOfRange => error_responses::is_retention_limit_out_of_range(&err),
             SLAError::DuplicateOutageInput => error_responses::is_duplicate_outage_input(&err),
             SLAError::InvalidPenaltyAmount => error_responses::is_invalid_penalty_amount(&err),
             SLAError::InvalidRewardAmount => error_responses::is_invalid_reward_amount(&err),
@@ -8140,16 +8237,7 @@ fn test_failure_catalog_matches_error_helpers() {
             err
         );
     }
-    assert_eq!(
-        schema.schema_version, 1,
-        "Result schema version changed — check migration notes"
-    );
-    assert_eq!(
-        schema.deprecated_symbols.len(),
-        0,
-        "Unexpected deprecated symbols in v1"
-    );}
-
+}
 
 // ============================================================
 // Issue #261 – Contract state fingerprint for release review and upgrade planning
@@ -8166,14 +8254,17 @@ fn test_failure_catalog_matches_error_helpers() {
 fn test_261_fingerprint_includes_all_required_fields() {
     let (_env, client, _actors) = setup();
     let fingerprint = client.get_contract_state_fingerprint();
-    
+
     assert_eq!(fingerprint.contract_name, symbol_short!("sla_calc"));
     assert_eq!(fingerprint.storage_version, 1);
     assert_eq!(fingerprint.result_schema_version, 1);
-    assert!(fingerprint.config_version_hash > 0, "config hash must be non-zero");
-    assert_eq!(fingerprint.is_paused, false);
-    assert_eq!(fingerprint.needs_migration, false);
-    assert_eq!(fingerprint.is_config_frozen, false);
+    assert!(
+        fingerprint.config_version_hash > 0,
+        "config hash must be non-zero"
+    );
+    assert!(!fingerprint.is_paused);
+    assert!(!fingerprint.needs_migration);
+    assert!(!fingerprint.is_config_frozen);
     // captured_at should be the ledger timestamp (0 in test env by default)
     assert_eq!(fingerprint.captured_at, 0);
 }
@@ -8183,7 +8274,7 @@ fn test_261_fingerprint_is_deterministic_on_repeated_calls() {
     let (_env, client, _actors) = setup();
     let fp1 = client.get_contract_state_fingerprint();
     let fp2 = client.get_contract_state_fingerprint();
-    
+
     assert_eq!(fp1.storage_version, fp2.storage_version);
     assert_eq!(fp1.result_schema_version, fp2.result_schema_version);
     assert_eq!(fp1.config_version_hash, fp2.config_version_hash);
@@ -8195,42 +8286,45 @@ fn test_261_fingerprint_is_deterministic_on_repeated_calls() {
 #[test]
 fn test_261_fingerprint_reflects_paused_state() {
     let (env, client, actors) = setup();
-    
+
     let fp_before = client.get_contract_state_fingerprint();
-    assert_eq!(fp_before.is_paused, false);
-    
+    assert!(!fp_before.is_paused);
+
     client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "maintenance"));
-    
+
     let fp_after = client.get_contract_state_fingerprint();
-    assert_eq!(fp_after.is_paused, true);
+    assert!(fp_after.is_paused);
 }
 
 #[test]
 fn test_261_fingerprint_reflects_config_frozen_state() {
     let (_env, client, actors) = setup();
-    
+
     let fp_before = client.get_contract_state_fingerprint();
-    assert_eq!(fp_before.is_config_frozen, false);
-    
+    assert!(!fp_before.is_config_frozen);
+
     client.freeze_config(&actors.admin);
-    
+
     let fp_after = client.get_contract_state_fingerprint();
-    assert_eq!(fp_after.is_config_frozen, true);
+    assert!(fp_after.is_config_frozen);
 }
 
 #[test]
 fn test_261_fingerprint_config_hash_changes_on_config_update() {
     let (_env, client, actors) = setup();
-    
+
     let fp_before = client.get_contract_state_fingerprint();
     let hash_before = fp_before.config_version_hash;
-    
+
     client.set_config(&actors.admin, &symbol_short!("critical"), &20, &200, &1000);
-    
+
     let fp_after = client.get_contract_state_fingerprint();
     let hash_after = fp_after.config_version_hash;
-    
-    assert_ne!(hash_before, hash_after, "config hash must change after config update");
+
+    assert_ne!(
+        hash_before, hash_after,
+        "config hash must change after config update"
+    );
 }
 
 #[test]
@@ -8238,7 +8332,7 @@ fn test_261_fingerprint_accessible_without_auth() {
     // The fingerprint function should not require auth — it's a pure read-only view.
     // This is implicitly tested by all previous tests, but let's be explicit.
     let (_env, client, _actors) = setup();
-    
+
     // No auth required — just call it directly
     let fingerprint = client.get_contract_state_fingerprint();
     assert_eq!(fingerprint.contract_name, symbol_short!("sla_calc"));
@@ -8248,17 +8342,17 @@ fn test_261_fingerprint_accessible_without_auth() {
 fn test_261_fingerprint_works_in_pre_migration_state() {
     // Force the contract into a pre-migration state (version mismatch)
     // and verify the fingerprint still returns successfully with needs_migration=true.
-    let (env, client, actors) = setup();
-    
+    let (env, client, _actors) = setup();
+
     // Manually write a different storage version to simulate pre-migration
     env.as_contract(&client.address, || {
         env.storage().instance().set(&symbol_short!("VER"), &0u32);
     });
-    
+
     // The fingerprint must still work (bypasses check_version)
     let fingerprint = client.get_contract_state_fingerprint();
     assert_eq!(fingerprint.storage_version, 0);
-    assert_eq!(fingerprint.needs_migration, true);
+    assert!(fingerprint.needs_migration);
 }
 
 #[test]
@@ -8267,23 +8361,23 @@ fn test_261_fingerprint_before_and_after_upgrade_differ() {
     // capture again, and verify config_version_hash remained stable but
     // needs_migration flipped.
     let (env, client, actors) = setup();
-    
+
     // Force version 0 to simulate pre-upgrade state
     env.as_contract(&client.address, || {
         env.storage().instance().set(&symbol_short!("VER"), &0u32);
     });
-    
+
     let fp_before = client.get_contract_state_fingerprint();
     assert_eq!(fp_before.storage_version, 0);
-    assert_eq!(fp_before.needs_migration, true);
-    
+    assert!(fp_before.needs_migration);
+
     // Migrate
     client.migrate(&actors.admin);
-    
+
     let fp_after = client.get_contract_state_fingerprint();
     assert_eq!(fp_after.storage_version, 1);
-    assert_eq!(fp_after.needs_migration, false);
-    
+    assert!(!fp_after.needs_migration);
+
     // Config hash should remain unchanged across migration if no config changed
     assert_eq!(fp_before.config_version_hash, fp_after.config_version_hash);
 }
@@ -8292,17 +8386,17 @@ fn test_261_fingerprint_before_and_after_upgrade_differ() {
 fn test_261_fingerprint_use_case_incident_response_audit() {
     // Use case: during an incident, quickly surface the contract's posture.
     let (env, client, actors) = setup();
-    
+
     // Simulate incident: admin pauses the contract
     client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "incident"));
-    
+
     // Backend calls fingerprint to check state
     let fingerprint = client.get_contract_state_fingerprint();
-    
-    assert_eq!(fingerprint.is_paused, true);
-    assert_eq!(fingerprint.is_config_frozen, false);
-    assert_eq!(fingerprint.needs_migration, false);
-    
+
+    assert!(fingerprint.is_paused);
+    assert!(!fingerprint.is_config_frozen);
+    assert!(!fingerprint.needs_migration);
+
     // All critical state visible in one call
 }
 
@@ -8311,14 +8405,14 @@ fn test_261_fingerprint_use_case_pre_upgrade_audit() {
     // Use case: before deploying a new contract version, capture the fingerprint
     // to compare against post-upgrade state.
     let (_env, client, _actors) = setup();
-    
+
     let fp_pre_upgrade = client.get_contract_state_fingerprint();
-    
+
     // Verify all expected pre-upgrade state
     assert_eq!(fp_pre_upgrade.storage_version, 1);
-    assert_eq!(fp_pre_upgrade.needs_migration, false);
+    assert!(!fp_pre_upgrade.needs_migration);
     assert!(fp_pre_upgrade.config_version_hash > 0);
-    
+
     // In a real workflow, this fingerprint would be stored and compared
     // against the post-upgrade fingerprint to verify only expected state changed.
 }
@@ -8327,16 +8421,19 @@ fn test_261_fingerprint_use_case_pre_upgrade_audit() {
 fn test_261_fingerprint_matches_individual_queries() {
     // Verify the fingerprint fields match what individual queries return.
     let (_env, client, _actors) = setup();
-    
+
     let fingerprint = client.get_contract_state_fingerprint();
     let version_info = client.get_version_info();
     let migration_state = client.get_migration_state();
     let config_hash = client.get_config_version_hash();
     let is_paused = client.is_paused();
     let is_frozen = client.is_config_frozen();
-    
+
     assert_eq!(fingerprint.storage_version, version_info.storage_version);
-    assert_eq!(fingerprint.result_schema_version, version_info.result_schema_version);
+    assert_eq!(
+        fingerprint.result_schema_version,
+        version_info.result_schema_version
+    );
     assert_eq!(fingerprint.needs_migration, version_info.needs_migration);
     assert_eq!(fingerprint.storage_version, migration_state.stored_version);
     assert_eq!(fingerprint.needs_migration, migration_state.needs_migration);
@@ -8350,6 +8447,15 @@ fn test_261_fingerprint_matches_individual_queries() {
 fn test_261_fingerprint_fails_on_uninitialized_contract() {
     // Before initialize(), the contract has no STORAGE_VERSION_KEY,
     // so get_contract_state_fingerprint should return NotInitialized.
+    let env = Env::default();
+    env.mock_all_auths();
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+
+    // No initialize() called — fingerprint must fail
+    client.get_contract_state_fingerprint();
+}
+
 // ============================================================
 // #244 – Public API descriptor tests
 // ============================================================
@@ -8424,9 +8530,9 @@ fn test_get_public_api_includes_all_major_methods() {
 fn test_get_public_api_method_count_is_stable() {
     let (_env, client, _actors) = setup();
     let api = client.get_public_api();
-    // 53 methods as of initial implementation
+    // 57 methods as of get_contract_info/get_contract_state_fingerprint/etc.
     // This test catches accidental additions or removals
-    assert_eq!(api.methods.len(), 53, "Public API method count changed");
+    assert_eq!(api.methods.len(), 57, "Public API method count changed");
 }
 
 #[test]
@@ -8450,17 +8556,17 @@ fn test_get_public_api_is_deterministic() {
 }
 
 #[test]
-fn test_get_public_api_requires_initialization() {    let env = Env::default();
-#[test]
 #[should_panic]
 fn test_get_public_api_requires_initialization() {
-    let env = Env::default();    env.mock_all_auths();
+    let env = Env::default();
+    env.mock_all_auths();
     let cid = env.register_contract(None, SLACalculatorContract);
     let client = SLACalculatorContractClient::new(&env, &cid);
-    
-    // No initialize() called — fingerprint must fail
-    client.get_contract_state_fingerprint();
+
+    // No initialize() called — get_public_api must panic
+    client.get_public_api();
 }
+
 #[test]
 fn test_failure_catalog_helpers_are_mutually_exclusive() {
     // Each predicate must recognize exactly its own variant and reject all
@@ -8489,7 +8595,9 @@ fn test_failure_catalog_helpers_are_mutually_exclusive() {
         SLAError::OutageRecalcLimit,
     ];
 
-    let predicates: [(&str, fn(&SLAError) -> bool); 19] = [
+    type ErrorPredicate = fn(&SLAError) -> bool;
+
+    let predicates: [(&str, ErrorPredicate); 19] = [
         ("is_already_initialized", error_responses::is_already_initialized),
         ("is_not_initialized", error_responses::is_not_initialized),
         ("is_unauthorized", error_responses::is_unauthorized),
@@ -8505,9 +8613,18 @@ fn test_failure_catalog_helpers_are_mutually_exclusive() {
             "is_retention_limit_out_of_range",
             error_responses::is_retention_limit_out_of_range,
         ),
-        ("is_duplicate_outage_input", error_responses::is_duplicate_outage_input),
-        ("is_invalid_penalty_amount", error_responses::is_invalid_penalty_amount),
-        ("is_invalid_reward_amount", error_responses::is_invalid_reward_amount),
+        (
+            "is_duplicate_outage_input",
+            error_responses::is_duplicate_outage_input,
+        ),
+        (
+            "is_invalid_penalty_amount",
+            error_responses::is_invalid_penalty_amount,
+        ),
+        (
+            "is_invalid_reward_amount",
+            error_responses::is_invalid_reward_amount,
+        ),
         ("is_config_frozen", error_responses::is_config_frozen),
         ("is_invalid_input", error_responses::is_invalid_input),
         ("is_severity_not_in_set", error_responses::is_severity_not_in_set),
@@ -8539,7 +8656,10 @@ fn test_failure_catalog_helpers_are_mutually_exclusive() {
             "predicate matching {:?} was not the expected helper",
             err
         );
-    }}
+    }
+}
+
+#[test]
 fn test_get_result_schema_version_change_requires_migration_note() {
     // This test intentionally checks that the schema version constant has not
     // drifted from a known-good value. Bumping the version is a breaking change
@@ -8591,6 +8711,9 @@ fn test_get_result_schema_requires_migration_version_if_not_v1() {
             "RESULT_SCHEMA_VERSION is now {} — add migration notes and update tests!",
             schema.schema_version
         );
+    }
+}
+
 // ============================================================
 // #221 – Deterministic concurrency policy for calculate_sla
 // ============================================================
@@ -8632,8 +8755,18 @@ fn test_221_same_outage_different_mttr_rejects_contradictory_input() {
     // config, the contract must reject the contradictory input.
     let (_env, client, actors) = setup();
 
-    client.calculate_sla(&actors.operator, &symbol_short!("CONC_B"), &symbol_short!("high"), &10);
-    client.calculate_sla(&actors.operator, &symbol_short!("CONC_B"), &symbol_short!("high"), &20);
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("CONC_B"),
+        &symbol_short!("high"),
+        &10,
+    );
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("CONC_B"),
+        &symbol_short!("high"),
+        &20,
+    );
 }
 
 #[test]
@@ -8674,10 +8807,7 @@ fn test_221_outage_recalc_limit_enforced() {
         let _ = client.calculate_sla(&actors.operator, &outage_id, &severity, &30);
     }
 
-    assert_eq!(
-        client.get_history().len(),
-        MAX_RECALCS_PER_OUTAGE as u32
-    );
+    assert_eq!(client.get_history().len(), MAX_RECALCS_PER_OUTAGE);
 }
 
 // ============================================================
@@ -8714,7 +8844,8 @@ const fn is_terminal(code: u32) -> bool {
         17 /* InvalidInput */         => true,
         18 /* SeverityNotInSet */     => true,
         19 /* OutageRecalcLimit */    => false, // pruning frees headroom
-        _ => true, // unknown future codes are terminal by default    }
+        _ => true, // unknown future codes are terminal by default
+    }
 }
 
 #[test]
@@ -8734,23 +8865,19 @@ fn test_get_result_schema_all_symbols_are_short_form() {
         schema.rating_poor,
     ];
     for s in symbols.iter() {
-        let bytes = s.to_str();
-        assert!(
-            bytes.len() <= 9,
-            "Symbol '{}' exceeds 9-char limit",
-            bytes
-        );
+        let bytes = s.to_string();
+        assert!(bytes.len() <= 9, "Symbol '{}' exceeds 9-char limit", bytes);
     }
+}
+
+#[test]
 fn test_227_all_error_codes_are_classified() {
     // Every error code in the catalogue must have a classification.
     // This fails if a new code is added to get_failure_schema but not here.
 
     // The enum has 19 variants (codes 1..19). Verify every one is
     // covered by our classification table.
-    let expected_codes: [u32; 19] = [
-        1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
-        11, 12, 13, 14, 15, 16, 17, 18, 19,
-    ];
+    let expected_codes: [u32; 19] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
 
     for code in &expected_codes {
         // Classification must not panic — every code is handled.
@@ -8814,14 +8941,8 @@ fn test_227_error_classification_count_matches_enum() {
     // If this fails, a new SLAError variant was added — update both
     // the is_terminal table and this test.
     let total = 4u32 /* retryable */ + 15u32 /* terminal */;
-    assert_eq!(total, 19, "Classification count mismatch — did you add an SLAError variant?");}
-
-    // Without initialization, get_public_api should return NotInitialized error
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.get_public_api();
-    }));
-    assert!(result.is_err(), "get_public_api should fail before initialization");
-}
-    // Without initialization, get_public_api should panic with NotInitialized
-    client.get_public_api();
+    assert_eq!(
+        total, 19,
+        "Classification count mismatch — did you add an SLAError variant?"
+    );
 }

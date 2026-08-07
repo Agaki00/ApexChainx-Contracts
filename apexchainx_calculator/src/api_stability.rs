@@ -48,10 +48,12 @@ pub enum StabilityScore {
 }
 
 impl StabilityScore {
+    /// Returns `true` when the score signals a breaking change.
     pub fn is_breaking(&self) -> bool {
         matches!(self, StabilityScore::C | StabilityScore::D)
     }
 
+    /// Returns a human-readable label describing the stability level.
     pub fn label(&self) -> &'static str {
         match self {
             StabilityScore::A => "A (stable)",
@@ -100,21 +102,8 @@ pub fn sl_a_error_count() -> u32 {
 /// Backend listeners depend on these names never changing.
 pub fn event_name_symbols() -> [&'static str; 15] {
     [
-        "sla_calc",
-        "set_int",
-        "cfg_upd",
-        "paused",
-        "unpause",
-        "op_set",
-        "pruned",
-        "pruned_a",
-        "adm_prop",
-        "adm_acc",
-        "adm_can",
-        "adm_ren",
-        "op_prop",
-        "op_acc",
-        "op_can",
+        "sla_calc", "set_int", "cfg_upd", "paused", "unpause", "op_set", "pruned", "pruned_a", "adm_prop",
+        "adm_acc", "adm_can", "adm_ren", "op_prop", "op_acc", "op_can",
     ]
 }
 
@@ -122,23 +111,8 @@ pub fn event_name_symbols() -> [&'static str; 15] {
 /// Changing any of these breaks storage layout and requires migration.
 pub fn storage_key_symbols() -> [&'static str; 17] {
     [
-        "ADMIN",
-        "OPERATOR",
-        "PADMIN",
-        "POP",
-        "CONFIG",
-        "CUSTCFG",
-        "PAUSED",
-        "PAUSEINF",
-        "STATS",
-        "CALCCNT",
-        "VIOLCNT",
-        "CALCLDG",
-        "VIOLLDG",
-        "HIST",
-        "VER",
-        "RETLIM",
-        "LCFGUPD",
+        "ADMIN", "OPERATOR", "PADMIN", "POP", "CONFIG", "CUSTCFG", "PAUSED", "PAUSEINF", "STATS", "CALCCNT",
+        "VIOLCNT", "CALCLDG", "VIOLLDG", "HIST", "VER", "RETLIM", "LCFGUPD",
     ]
 }
 
@@ -189,8 +163,15 @@ mod tests {
 
         // SLAResult must have exactly 9 fields (the documented ABI surface).
         let sla_result = counts.iter().find(|(name, _)| *name == "SLAResult");
-        assert!(sla_result.is_some(), "SLAResult must be in canonical_field_counts");
-        assert_eq!(sla_result.unwrap().1, 9, "SLAResult field count changed — bump RESULT_SCHEMA_VERSION");
+        assert!(
+            sla_result.is_some(),
+            "SLAResult must be in canonical_field_counts"
+        );
+        assert_eq!(
+            sla_result.unwrap().1,
+            9,
+            "SLAResult field count changed — bump RESULT_SCHEMA_VERSION"
+        );
     }
 
     #[test]
@@ -256,10 +237,7 @@ mod tests {
     fn test_225_sla_error_count_consistent_with_lib_enum() {
         // The sl_a_error_count() function must match the SLAError enum.
         // We verify by checking that all known discriminants exist.
-        let discriminants: [u32; 19] = [
-            1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
-            11, 12, 13, 14, 15, 16, 17, 18, 19,
-        ];
+        let discriminants: [u32; 19] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
         assert_eq!(
             discriminants.len() as u32,
             sl_a_error_count(),

@@ -2,6 +2,7 @@
 
 use soroban_sdk::contracttype;
 
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HistoryRetentionMetrics {

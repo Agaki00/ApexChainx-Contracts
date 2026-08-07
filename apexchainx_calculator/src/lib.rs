@@ -7,7 +7,12 @@
 //! cumulative statistics, event emission for backend indexing, and storage
 //! version migration.
 #![no_std]
-#![warn(missing_docs)]
+// Note: `missing_docs` is intentionally NOT enabled as a crate lint here.
+// Soroban's `#[contract]`/`#[contracttype]`/`#[contracterror]` proc macros
+// generate undocumented public items that cannot be suppressed at the item
+// level, so enabling `missing_docs` makes `cargo clippy -- -D warnings`
+// (a CI gate) impossible to satisfy. Doc discipline is enforced by review
+// instead. See git history for `5a4be57` (deny -> warn -> off).
 extern crate alloc;
 
 use soroban_sdk::{
@@ -24,17 +29,10 @@ mod tests;
 #[cfg(test)]
 mod fuzz_tests;
 
-/// Parity checker: compares current `compute_result` against the locked-in
-/// canonical golden vectors in `test_snapshots/tests/parity_baseline.json`.
-/// Run with `cargo test --lib parity_tests::` or `just parity-check`.
-#[cfg(test)]
-mod parity_tests;
-#[cfg(test)]
-mod storage_footprint_tests;
-mod prune_benchmark;pub mod audit_state;
-mod schema_migration_tests;
-pub mod audit_state;pub mod calculation;
-pub mod api_stability;pub mod config;
+pub mod api_stability;
+pub mod audit_state;
+pub mod calculation;
+pub mod config;
 pub mod config_bundle;
 pub mod config_freeze;
 pub mod config_metadata;
@@ -42,12 +40,25 @@ pub mod contract_info;
 pub mod coordination_harness;
 pub mod cross_contract_safety;
 pub mod error_responses;
+pub mod event;
 pub mod event_correlation;
 mod event_schema;
 pub mod governance;
 pub mod history;
 pub mod history_snapshot;
 pub mod metadata;
+pub mod metrics;
+/// Parity checker: compares current `compute_result` against the locked-in
+/// canonical golden vectors in `test_snapshots/tests/parity_baseline.json`.
+/// Run with `cargo test --lib parity_tests::` or `just parity-check`.
+#[cfg(test)]
+mod parity_tests;
+#[cfg(test)]
+mod prune_benchmark;
+#[cfg(test)]
+mod schema_migration_tests;
+#[cfg(test)]
+mod storage_footprint_tests;
 pub mod version_negotiation;
 
 use crate::audit_state::AuditState;
@@ -1207,7 +1218,7 @@ impl SLACalculatorContract {
     // -------------------------------------------------------------------
 
     /// Returns the current admin address.
-pub fn get_admin(env: Env) -> Result<Address, SLAError> {
+    pub fn get_admin(env: Env) -> Result<Address, SLAError> {
         Self::check_version(&env)?;
         env.storage()
             .instance()
@@ -1451,7 +1462,7 @@ pub fn get_admin(env: Env) -> Result<Address, SLAError> {
     // -------------------------------------------------------------------
 
     /// Updates the configuration for a canonical severity level. Admin only.
-pub fn set_config(
+    pub fn set_config(
         env: Env,
         caller: Address,
         severity: Symbol,
@@ -1500,7 +1511,7 @@ pub fn set_config(
     }
 
     /// Returns the configuration for the given severity.
-pub fn get_config(env: Env, severity: Symbol) -> Result<SLAConfig, SLAError> {
+    pub fn get_config(env: Env, severity: Symbol) -> Result<SLAConfig, SLAError> {
         Self::check_version(&env)?;
         Self::load_config(&env, &severity)
     }
@@ -1619,7 +1630,7 @@ pub fn get_config(env: Env, severity: Symbol) -> Result<SLAConfig, SLAError> {
     }
 
     /// Lists all configured severity-to-config mappings.
-pub fn list_configs(env: Env) -> Result<Map<Symbol, SLAConfig>, SLAError> {
+    pub fn list_configs(env: Env) -> Result<Map<Symbol, SLAConfig>, SLAError> {
         Self::check_version(&env)?;
         env.storage()
             .instance()
@@ -1728,7 +1739,7 @@ pub fn list_configs(env: Env) -> Result<Map<Symbol, SLAConfig>, SLAError> {
     }
 
     /// Returns the result schema descriptor for backend symbol mapping.
-pub fn get_result_schema(env: Env) -> Result<SLAResultSchema, SLAError> {
+    pub fn get_result_schema(env: Env) -> Result<SLAResultSchema, SLAError> {
         Self::check_version(&env)?;
         Ok(SLAResultSchema {
             version: symbol_short!("v1"),
@@ -1768,7 +1779,7 @@ pub fn get_result_schema(env: Env) -> Result<SLAResultSchema, SLAError> {
     }
 
     /// Returns the full audit state including roles, config, stats, and history.
-pub fn get_full_audit_state(env: Env) -> Result<AuditState, SLAError> {
+    pub fn get_full_audit_state(env: Env) -> Result<AuditState, SLAError> {
         Self::check_version(&env)?;
 
         let admin = Self::get_admin(env.clone())?;
@@ -2628,9 +2639,7 @@ pub fn get_full_audit_state(env: Env) -> Result<AuditState, SLAError> {
         // unexpected out-of-bounds condition into a deterministic error
         // rather than a panic.
         if index + 1 < severities.len() {
-            let lower_sev = severities
-                .get(index + 1)
-                .ok_or(SLAError::InvalidSeverity)?;
+            let lower_sev = severities.get(index + 1).ok_or(SLAError::InvalidSeverity)?;
             if let Some(lower_cfg) = configs.get(lower_sev.clone()) {
                 if new_penalty < lower_cfg.penalty_per_minute {
                     return Err(SLAError::InvalidPenalty);
@@ -2646,12 +2655,9 @@ pub fn get_full_audit_state(env: Env) -> Result<AuditState, SLAError> {
         // Same defensive `ok_or` pattern: the bounds check above guarantees
         // `index - 1` is valid for index in 1..=2, but the explicit error
         // conversion prevents a silent panic if that invariant is ever broken.
-        if index >= 1 && index <= 2 {
-            let higher_sev = severities
-                .get(index - 1)
-                .ok_or(SLAError::InvalidSeverity)?;
         if (1..=2).contains(&index) {
-            let higher_sev = severities.get(index - 1).unwrap();            if let Some(higher_cfg) = configs.get(higher_sev.clone()) {
+            let higher_sev = severities.get(index - 1).ok_or(SLAError::InvalidSeverity)?;
+            if let Some(higher_cfg) = configs.get(higher_sev.clone()) {
                 if new_penalty > higher_cfg.penalty_per_minute {
                     return Err(SLAError::InvalidPenalty);
                 }
@@ -3282,10 +3288,8 @@ pub fn get_full_audit_state(env: Env) -> Result<AuditState, SLAError> {
 
         // Config version hash computation is safe even in pre-migration state
         // because load_config works across all initialized states.
-        let config_version_hash = match Self::compute_config_version_hash(&env) {
-            Ok(hash) => hash,
-            Err(_) => 0u64, // If config is unreadable, use sentinel 0
-        };
+        // If config is unreadable, fall back to sentinel 0.
+        let config_version_hash: u64 = Self::compute_config_version_hash(&env).unwrap_or(0);
 
         // Pause and freeze state default to false if keys are absent.
         let is_paused: bool = env.storage().instance().get(&PAUSED_KEY).unwrap_or(false);

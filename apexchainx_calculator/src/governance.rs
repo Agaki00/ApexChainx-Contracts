@@ -15,12 +15,8 @@ use crate::{
 
 /// Proposes a new admin. The current admin initiates; the new admin must
 /// call `accept_admin` to complete the transfer.
-pub fn propose_admin(
-    env: &Env,
-    caller: &Address,
-    new_admin: &Address,
-) -> Result<(), SLAError> {
-pub fn propose_admin(env: &Env, caller: &Address, new_admin: &Address) -> Result<(), SLAError> {    crate::SLACalculatorContract::check_version(env)?;
+pub fn propose_admin(env: &Env, caller: &Address, new_admin: &Address) -> Result<(), SLAError> {
+    crate::SLACalculatorContract::check_version(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
     env.storage().instance().set(&PENDING_ADMIN_KEY, new_admin);
     env.events().publish(
@@ -70,12 +66,8 @@ pub fn get_pending_admin(env: &Env) -> Result<Option<Address>, SLAError> {
 
 /// Proposes a new operator. The current admin initiates; the new operator
 /// must call `accept_operator` to complete the handoff.
-pub fn propose_operator(
-    env: &Env,
-    caller: &Address,
-    new_operator: &Address,
-) -> Result<(), SLAError> {
-pub fn propose_operator(env: &Env, caller: &Address, new_operator: &Address) -> Result<(), SLAError> {    crate::SLACalculatorContract::check_version(env)?;
+pub fn propose_operator(env: &Env, caller: &Address, new_operator: &Address) -> Result<(), SLAError> {
+    crate::SLACalculatorContract::check_version(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
     env.storage().instance().set(&PENDING_OP_KEY, new_operator);
     env.events().publish(
@@ -135,12 +127,8 @@ pub fn renounce_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
 }
 
 /// Replaces the operator address directly (single-step, admin only).
-pub fn set_operator(
-    env: &Env,
-    caller: &Address,
-    new_operator: &Address,
-) -> Result<(), SLAError> {
-pub fn set_operator(env: &Env, caller: &Address, new_operator: &Address) -> Result<(), SLAError> {    crate::SLACalculatorContract::check_version(env)?;
+pub fn set_operator(env: &Env, caller: &Address, new_operator: &Address) -> Result<(), SLAError> {
+    crate::SLACalculatorContract::check_version(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
     env.storage().instance().set(&OPERATOR_KEY, new_operator);
     env.events().publish(

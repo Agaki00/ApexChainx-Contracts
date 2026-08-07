@@ -31,8 +31,7 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        SLACalculatorContract, SLACalculatorContractClient, RESULT_SCHEMA_FIELD_COUNT,
-        RESULT_SCHEMA_VERSION,
+        SLACalculatorContract, SLACalculatorContractClient, RESULT_SCHEMA_FIELD_COUNT, RESULT_SCHEMA_VERSION,
     };
     use soroban_sdk::{testutils::Address as _, Env, Symbol};
 
@@ -108,8 +107,7 @@ mod tests {
         // RESULT_SCHEMA_FIELD_COUNT is not, this assertion catches the gap.
         let _ = &env; // env kept for Soroban test harness compatibility
         assert_eq!(
-            RESULT_SCHEMA_FIELD_COUNT,
-            9,
+            RESULT_SCHEMA_FIELD_COUNT, 9,
             "RESULT_SCHEMA_FIELD_COUNT is out of sync with SLAResult. \
              Update lib.rs::RESULT_SCHEMA_FIELD_COUNT and \
              RESULT_SCHEMA_VERSION when adding or removing fields."
