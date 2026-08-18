@@ -340,6 +340,10 @@ or violation ledger entry.
 - **Reset is explicit** — counters are set to zero when the window advances
 - **Last calculation/violation ledger** snapshots are stored per severity
   to determine when a reset is needed
+- **Saturation is explicit** — each severity lane is a `u32` and is incremented
+  with `saturating_add(1)`, so a lane saturates at `u32::MAX` instead of
+  wrapping (release) or panicking (debug). `u32::MAX` means "many" and is never
+  reset to zero by overflow.
 - **Backends should not rely on exact counter values** across window boundaries;
   use the `SeverityTelemetry` view for consistent reads
 
