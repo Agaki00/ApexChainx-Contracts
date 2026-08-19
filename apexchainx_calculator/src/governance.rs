@@ -17,6 +17,7 @@ use crate::{
 /// call `accept_admin` to complete the transfer.
 pub fn propose_admin(env: &Env, caller: &Address, new_admin: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
+    crate::config_freeze::require_not_frozen(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
     env.storage().instance().set(&PENDING_ADMIN_KEY, new_admin);
     env.events().publish(
@@ -29,6 +30,7 @@ pub fn propose_admin(env: &Env, caller: &Address, new_admin: &Address) -> Result
 /// Accepts a pending admin transfer. Must be called by the proposed new admin.
 pub fn accept_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
+    crate::config_freeze::require_not_frozen(env)?;
     caller.require_auth();
     let pending: Address = env
         .storage()
@@ -48,6 +50,7 @@ pub fn accept_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
 /// Cancels a pending admin proposal. Only the current admin may cancel.
 pub fn cancel_admin_proposal(env: &Env, caller: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
+    crate::config_freeze::require_not_frozen(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
     if !env.storage().instance().has(&PENDING_ADMIN_KEY) {
         return Err(SLAError::NoPendingTransfer);
@@ -68,6 +71,7 @@ pub fn get_pending_admin(env: &Env) -> Result<Option<Address>, SLAError> {
 /// must call `accept_operator` to complete the handoff.
 pub fn propose_operator(env: &Env, caller: &Address, new_operator: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
+    crate::config_freeze::require_not_frozen(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
     env.storage().instance().set(&PENDING_OP_KEY, new_operator);
     env.events().publish(
@@ -80,6 +84,7 @@ pub fn propose_operator(env: &Env, caller: &Address, new_operator: &Address) -> 
 /// Accepts a pending operator handoff. Must be called by the proposed new operator.
 pub fn accept_operator(env: &Env, caller: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
+    crate::config_freeze::require_not_frozen(env)?;
     caller.require_auth();
     let pending: Address = env
         .storage()
@@ -99,6 +104,7 @@ pub fn accept_operator(env: &Env, caller: &Address) -> Result<(), SLAError> {
 /// Cancels a pending operator proposal. Only the current admin may cancel.
 pub fn cancel_operator_proposal(env: &Env, caller: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
+    crate::config_freeze::require_not_frozen(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
     if !env.storage().instance().has(&PENDING_OP_KEY) {
         return Err(SLAError::NoPendingTransfer);
@@ -118,6 +124,7 @@ pub fn get_pending_operator(env: &Env) -> Result<Option<Address>, SLAError> {
 /// Permanently renounces admin authority. Irreversible.
 pub fn renounce_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
+    crate::config_freeze::require_not_frozen(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
     env.storage().instance().remove(&ADMIN_KEY);
     env.storage().instance().remove(&PENDING_ADMIN_KEY);
@@ -129,6 +136,7 @@ pub fn renounce_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
 /// Replaces the operator address directly (single-step, admin only).
 pub fn set_operator(env: &Env, caller: &Address, new_operator: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
+    crate::config_freeze::require_not_frozen(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
     env.storage().instance().set(&OPERATOR_KEY, new_operator);
     env.events().publish(
