@@ -76,10 +76,16 @@ mod tests {
         let initial_rent = client.get_rent_estimate();
         assert!(initial_rent > 0);
 
-        // Add 5 history entries
+        // Add 5 history entries with distinct outage IDs
+        let outage_ids = [
+            symbol_short!("SF001"),
+            symbol_short!("SF002"),
+            symbol_short!("SF003"),
+            symbol_short!("SF004"),
+            symbol_short!("SF005"),
+        ];
         for i in 0..5 {
-            let outage_id = symbol_short!("SF001");
-            client.calculate_sla(&operator, &outage_id, &symbol_short!("critical"), &(i + 1));
+            client.calculate_sla(&operator, &outage_ids[i], &symbol_short!("critical"), &((i as u32) + 1));
         }
 
         let updated_footprint = client.get_storage_footprint_estimate();
