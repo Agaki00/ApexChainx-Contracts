@@ -22,6 +22,7 @@
   internal severity list invariant is ever broken the call surfaces a
   deterministic `InvalidSeverity` error rather than an unrecoverable host trap.
 ### Added
+- Per-severity telemetry counter saturation regression coverage — documented the `u32` lane saturation behavior in the `record_severity_telemetry` code docs and `docs/CONTRACT_MAINTENANCE_POLICY.md`, and added `test_severity_telemetry_counters_saturate_at_u32_max` to verify counters saturate at `u32::MAX` instead of wrapping (release) or panicking (debug) (#387)
 - `docs/CONTRACT_SHAPE_CHANGE_CHECKLIST.md` — release-readiness checklist for PRs that touch storage keys, `STORAGE_VERSION`, event topic constants, or event payload fields; cross-referenced from `CONTRIBUTING.md` as SC-100
 - **[SC-509] SLAError Addition Workflow** (#253) — comprehensive contributor guide for adding, deprecating, or reviewing `SLAError` variants without breaking backend adapter logic. See `docs/sla-error-additions-guide.md`.
 - `error_responses::is_severity_not_in_set` — typed helper predicate for `SLAError::SeverityNotInSet` (#253)

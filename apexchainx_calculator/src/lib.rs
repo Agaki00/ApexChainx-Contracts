@@ -2805,6 +2805,12 @@ impl SLACalculatorContract {
         );
     }
 
+    /// Records per-severity calculation/violation counters for telemetry.
+    ///
+    /// Each severity lane is a `u32`. Counters are incremented with
+    /// `saturating_add(1)`, so they saturate at `u32::MAX` instead of wrapping
+    /// (release) or panicking (debug). A saturated lane is treated as "many"
+    /// and is never reset to zero by overflow.
     fn record_severity_telemetry(env: &Env, severity: &Symbol, met: bool) {
         let index = Self::canonical_severity_index(severity).unwrap_or(0);
         let mut calculations = Self::load_counts(env, &SEVERITY_CALC_COUNTS_KEY);

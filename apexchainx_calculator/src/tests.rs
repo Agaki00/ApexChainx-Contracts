@@ -304,6 +304,36 @@ fn test_severity_telemetry_weekly_reset_semantics() {
     assert_eq!(high4.violation_rate, 100);
 }
 
+#[test]
+fn test_severity_telemetry_counters_saturate_at_u32_max() {
+    let (env, client, actors) = setup();
+    env.ledger().set_timestamp(1000);
+
+    // Seed the critical lane (index 0) of both per-severity counters at u32::MAX.
+    let lane_max = u32::MAX as u128;
+    env.as_contract(&client.address, || {
+        env.storage().instance().set(&SEVERITY_CALC_COUNTS_KEY, &lane_max);
+        env.storage().instance().set(&SEVERITY_VIOL_COUNTS_KEY, &lane_max);
+    });
+
+    // A violation (20 > 15-minute critical threshold) increments both counters.
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EVTSAT"),
+        &symbol_short!("critical"),
+        &20,
+    );
+
+    // Incrementing past u32::MAX must saturate (stay at u32::MAX), not wrap.
+    env.as_contract(&client.address, || {
+        let calculations: u128 = env.storage().instance().get(&SEVERITY_CALC_COUNTS_KEY).unwrap();
+        let violations: u128 = env.storage().instance().get(&SEVERITY_VIOL_COUNTS_KEY).unwrap();
+
+        assert_eq!((calculations & 0xFFFF_FFFF) as u32, u32::MAX);
+        assert_eq!((violations & 0xFFFF_FFFF) as u32, u32::MAX);
+    });
+}
+
 // ============================================================
 // #28 – Operator management
 // ============================================================

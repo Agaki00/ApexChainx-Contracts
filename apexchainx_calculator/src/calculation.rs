@@ -305,6 +305,11 @@ fn set_count_lane(packed: u128, index: u32, value: u32) -> u128 {
 /// - **Lane Isolation**: Reset is per-severity lane. Calculations or inactivity in one severity level do not reset telemetry for other severities.
 /// - **Reinitialization**: Upon reset, the lane's calculation and violation counters are cleared to 0 before the current invocation is recorded,
 ///   reinitializing the count to 1 calculation (and 1 violation if the current calculation violated SLA).
+///
+/// ### Counter Saturation
+/// Each severity lane is a `u32`. Increments use `saturating_add(1)`, so a lane
+/// saturates at `u32::MAX` rather than wrapping (release) or panicking (debug).
+/// `u32::MAX` is treated as "many" and is never reset to zero by overflow.
 pub fn record_severity_telemetry(env: &Env, severity: &Symbol, met: bool) {
     let index = crate::SLACalculatorContract::canonical_severity_index(severity).unwrap_or(0);
     let mut calculations = load_counts(env, &SEVERITY_CALC_COUNTS_KEY);
