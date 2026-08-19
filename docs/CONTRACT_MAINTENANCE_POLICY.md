@@ -361,10 +361,14 @@ during an active incident.
 
 | Operation | Pause State Impact | Migration State Impact | Notes |
 |-----------|-------------------|----------------------|-------|
-| `propose_admin` + `accept_admin` | None — pause state unaffected | None — storage version unaffected | Safe during incident if new admin is trusted |
-| `propose_operator` + `accept_operator` | None — pause state unaffected | None — storage version unaffected | Operator can be rotated mid-incident |
-| `set_operator` (direct) | None | None | Instant handoff; prefer two-step for audit |
-| `renounce_admin` | **Critical** — removes admin; no admin can unpause | **Critical** — no admin can call `migrate` | **Only call after confirming operator is trusted and no migration is pending** |
+| `propose_admin` + `accept_admin` | None — pause state unaffected | None — storage version unaffected | Safe during incident if new admin is trusted; blocked during config freeze |
+| `propose_operator` + `accept_operator` | None — pause state unaffected | None — storage version unaffected | Operator can be rotated mid-incident; blocked during config freeze |
+| `set_operator` (direct) | None | None | Instant handoff; prefer two-step for audit; blocked during config freeze |
+| `renounce_admin` | **Critical** — removes admin; no admin can unpause | **Critical** — no admin can call `migrate` | **Only call after confirming operator is trusted and no migration is pending**; blocked during config freeze |
+
+### Config Freeze Gating for Governance Operations
+
+All governance operations (`propose_admin`, `accept_admin`, `cancel_admin_proposal`, `propose_operator`, `accept_operator`, `cancel_operator_proposal`, `renounce_admin`, `set_operator`) are gated by the configuration freeze state (`is_config_frozen()`). When the configuration is frozen (`FREEZE == true`), all role mutation operations are strictly blocked and return `SLAError::ConfigFrozen` (#16) to prevent governance manipulation during frozen audit periods.
 
 ### Admin Renouncement Safety Checklist
 
