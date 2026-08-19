@@ -102,6 +102,12 @@ pub fn get_last_config_update(env: &Env) -> Result<Option<crate::ConfigUpdateInf
 }
 
 /// Registers or updates a custom (non-canonical) severity level.
+///
+/// # Overwrite & Lifecycle Behavior
+/// - If a custom severity with the given symbol is not registered, it is added to `CUSTCFG`.
+/// - If a custom severity with the given symbol already exists, calling `set_custom_severity`
+///   overwrites the existing parameters (`threshold_minutes`, `penalty_per_minute`, `reward_base`) in-place.
+/// - In both cases, a `cfg_upd` (`EVENT_CONFIG_UPD`) event is emitted with the severity symbol and parameters.
 pub fn set_custom_severity(
     env: &Env,
     severity: Symbol,
