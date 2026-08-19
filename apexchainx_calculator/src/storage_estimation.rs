@@ -15,15 +15,13 @@ pub fn get_storage_footprint_estimate(env: &Env) -> Result<u64, SLAError> {
         .storage()
         .instance()
         .get::<Symbol, Vec<crate::SLAResult>>(&HISTORY_KEY)
-        .map(|h| h.len() as u64)
-        .unwrap_or(0);
+        .map_or(0, |h| h.len() as u64);
 
     let custom_count = env
         .storage()
         .instance()
         .get::<Symbol, Map<Symbol, SLAConfig>>(&CUSTOM_CONFIG_KEY)
-        .map(|m| m.len() as u64)
-        .unwrap_or(0);
+        .map_or(0, |m| m.len() as u64);
 
     // Base contract instance overhead (~1,024 bytes)
     let base_bytes: u64 = 1024;
@@ -83,10 +81,10 @@ mod tests {
             symbol_short!("SF004"),
             symbol_short!("SF005"),
         ];
-        for i in 0..5 {
+        for (i, outage_id) in outage_ids.iter().enumerate() {
             client.calculate_sla(
                 &operator,
-                &outage_ids[i],
+                outage_id,
                 &symbol_short!("critical"),
                 &((i as u32) + 1),
             );
