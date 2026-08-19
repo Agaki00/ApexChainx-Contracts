@@ -1243,15 +1243,7 @@ impl SLACalculatorContract {
     /// Replace the operator address (admin only).
     /// Emits an `op_set` event.
     pub fn set_operator(env: Env, caller: Address, new_operator: Address) -> Result<(), SLAError> {
-        Self::check_version(&env)?;
-        Self::require_admin(&env, &caller)?;
-
-        env.storage().instance().set(&OPERATOR_KEY, &new_operator);
-
-        env.events()
-            .publish((EVENT_OP_SET, EVENT_VERSION, caller), (new_operator.clone(),));
-
-        Ok(())
+        governance::set_operator(&env, &caller, &new_operator)
     }
 
     // -------------------------------------------------------------------
@@ -1260,51 +1252,25 @@ impl SLACalculatorContract {
 
     /// Propose a new admin. The current admin initiates; the new admin must call `accept_admin`.
     pub fn propose_admin(env: Env, caller: Address, new_admin: Address) -> Result<(), SLAError> {
-        Self::check_version(&env)?;
-        Self::require_admin(&env, &caller)?;
-        env.storage().instance().set(&PENDING_ADMIN_KEY, &new_admin);
-        env.events()
-            .publish((EVENT_ADMIN_PROP, EVENT_VERSION, caller), (new_admin,));
-        Ok(())
+        governance::propose_admin(&env, &caller, &new_admin)
     }
 
     /// Accept a pending admin transfer. Must be called by the proposed new admin.
     /// On success the caller becomes admin and the pending proposal is cleared.
     pub fn accept_admin(env: Env, caller: Address) -> Result<(), SLAError> {
-        Self::check_version(&env)?;
-        caller.require_auth();
-        let pending: Address = env
-            .storage()
-            .instance()
-            .get(&PENDING_ADMIN_KEY)
-            .ok_or(SLAError::NoPendingTransfer)?;
-        if caller != pending {
-            return Err(SLAError::Unauthorized);
-        }
-        env.storage().instance().set(&ADMIN_KEY, &caller);
-        env.storage().instance().remove(&PENDING_ADMIN_KEY);
-        env.events().publish((EVENT_ADMIN_ACC, EVENT_VERSION, caller), ());
-        Ok(())
+        governance::accept_admin(&env, &caller)
     }
 
     /// Cancel a pending admin transfer. Only the current admin may cancel.
     /// Clears the pending proposal without changing the active admin.
     /// Returns `NoPendingTransfer` if there is nothing to cancel.
     pub fn cancel_admin_proposal(env: Env, caller: Address) -> Result<(), SLAError> {
-        Self::check_version(&env)?;
-        Self::require_admin(&env, &caller)?;
-        if !env.storage().instance().has(&PENDING_ADMIN_KEY) {
-            return Err(SLAError::NoPendingTransfer);
-        }
-        env.storage().instance().remove(&PENDING_ADMIN_KEY);
-        env.events().publish((EVENT_ADMIN_CAN, EVENT_VERSION, caller), ());
-        Ok(())
+        governance::cancel_admin_proposal(&env, &caller)
     }
 
     /// Returns the pending admin address, if any.
     pub fn get_pending_admin(env: Env) -> Result<Option<Address>, SLAError> {
-        Self::check_version(&env)?;
-        Ok(env.storage().instance().get(&PENDING_ADMIN_KEY))
+        governance::get_pending_admin(&env)
     }
 
     /// Returns the estimated total storage footprint size in bytes.
@@ -1323,50 +1289,24 @@ impl SLACalculatorContract {
 
     /// Propose a new operator. The current admin initiates; the new operator must call `accept_operator`.
     pub fn propose_operator(env: Env, caller: Address, new_operator: Address) -> Result<(), SLAError> {
-        Self::check_version(&env)?;
-        Self::require_admin(&env, &caller)?;
-        env.storage().instance().set(&PENDING_OP_KEY, &new_operator);
-        env.events()
-            .publish((EVENT_OP_PROP, EVENT_VERSION, caller), (new_operator,));
-        Ok(())
+        governance::propose_operator(&env, &caller, &new_operator)
     }
 
     /// Accept a pending operator handoff. Must be called by the proposed new operator.
     pub fn accept_operator(env: Env, caller: Address) -> Result<(), SLAError> {
-        Self::check_version(&env)?;
-        caller.require_auth();
-        let pending: Address = env
-            .storage()
-            .instance()
-            .get(&PENDING_OP_KEY)
-            .ok_or(SLAError::NoPendingTransfer)?;
-        if caller != pending {
-            return Err(SLAError::Unauthorized);
-        }
-        env.storage().instance().set(&OPERATOR_KEY, &caller);
-        env.storage().instance().remove(&PENDING_OP_KEY);
-        env.events().publish((EVENT_OP_ACC, EVENT_VERSION, caller), ());
-        Ok(())
+        governance::accept_operator(&env, &caller)
     }
 
     /// Cancel a pending operator proposal. Only the current admin may cancel.
     /// Clears the pending proposal without changing the active operator.
     /// Returns `NoPendingTransfer` if there is nothing to cancel.
     pub fn cancel_operator_proposal(env: Env, caller: Address) -> Result<(), SLAError> {
-        Self::check_version(&env)?;
-        Self::require_admin(&env, &caller)?;
-        if !env.storage().instance().has(&PENDING_OP_KEY) {
-            return Err(SLAError::NoPendingTransfer);
-        }
-        env.storage().instance().remove(&PENDING_OP_KEY);
-        env.events().publish((EVENT_OP_CAN, EVENT_VERSION, caller), ());
-        Ok(())
+        governance::cancel_operator_proposal(&env, &caller)
     }
 
     /// Returns the pending operator address, if any.
     pub fn get_pending_operator(env: Env) -> Result<Option<Address>, SLAError> {
-        Self::check_version(&env)?;
-        Ok(env.storage().instance().get(&PENDING_OP_KEY))
+        governance::get_pending_operator(&env)
     }
 
     // -------------------------------------------------------------------
@@ -1377,12 +1317,7 @@ impl SLACalculatorContract {
     /// exist after this call and admin-gated functions will be permanently locked.
     /// Any pending admin proposal is also cleared.
     pub fn renounce_admin(env: Env, caller: Address) -> Result<(), SLAError> {
-        Self::check_version(&env)?;
-        Self::require_admin(&env, &caller)?;
-        env.storage().instance().remove(&ADMIN_KEY);
-        env.storage().instance().remove(&PENDING_ADMIN_KEY);
-        env.events().publish((EVENT_ADMIN_REN, EVENT_VERSION, caller), ());
-        Ok(())
+        governance::renounce_admin(&env, &caller)
     }
 
     /// Pause the contract with a reason and timestamp.
