@@ -57,6 +57,7 @@ mod parity_tests;
 mod prune_benchmark;
 #[cfg(test)]
 mod schema_migration_tests;
+pub mod storage_estimation;
 #[cfg(test)]
 mod storage_footprint_tests;
 pub mod version_negotiation;
@@ -1270,6 +1271,16 @@ impl SLACalculatorContract {
     /// Returns the pending admin address, if any.
     pub fn get_pending_admin(env: Env) -> Result<Option<Address>, SLAError> {
         governance::get_pending_admin(&env)
+    }
+
+    /// Returns the estimated total storage footprint size in bytes.
+    pub fn get_storage_footprint_estimate(env: Env) -> Result<u64, SLAError> {
+        storage_estimation::get_storage_footprint_estimate(&env)
+    }
+
+    /// Returns the estimated per-ledger rent cost in stroops based on storage footprint.
+    pub fn get_rent_estimate(env: Env) -> Result<i128, SLAError> {
+        storage_estimation::get_rent_estimate(&env)
     }
 
     // -------------------------------------------------------------------
