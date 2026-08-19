@@ -171,6 +171,40 @@ jobs:
         working-directory: apexchainx_calculator
         run: "cargo test --lib fuzz_tests::"
 
+  # Issue #388: run the config-mutation-sequence fuzz target for a fixed number
+  # of iterations as a regression test. A fixed seed keeps the run reproducible;
+  # this is a bounded regression (not an unbounded campaign — see fuzz.yml for
+  # the nightly long-running campaign).
+  fuzz-regression:
+    name: Fuzz Regression (config mutation sequences)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apexchainx_calculator/fuzz/target
+          key: fuzz-regression-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            fuzz-regression-${{ runner.os }}-cargo-
+
+      - name: Run config mutation sequence fuzz target (fixed iterations)
+        working-directory: apexchainx_calculator/fuzz
+        run: cargo +nightly fuzz run config_mutation_sequences -- -runs=10000 -seed=388
+
   release-tests:
     name: Release Tests (#90)
     runs-on: ubuntu-latest
