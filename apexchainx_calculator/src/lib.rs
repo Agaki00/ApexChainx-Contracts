@@ -48,6 +48,7 @@ pub mod history;
 pub mod history_snapshot;
 pub mod metadata;
 pub mod metrics;
+pub mod storage_estimation;
 /// Parity checker: compares current `compute_result` against the locked-in
 /// canonical golden vectors in `test_snapshots/tests/parity_baseline.json`.
 /// Run with `cargo test --lib parity_tests::` or `just parity-check`.
@@ -1304,6 +1305,16 @@ impl SLACalculatorContract {
     pub fn get_pending_admin(env: Env) -> Result<Option<Address>, SLAError> {
         Self::check_version(&env)?;
         Ok(env.storage().instance().get(&PENDING_ADMIN_KEY))
+    }
+
+    /// Returns the estimated total storage footprint size in bytes.
+    pub fn get_storage_footprint_estimate(env: Env) -> Result<u64, SLAError> {
+        storage_estimation::get_storage_footprint_estimate(&env)
+    }
+
+    /// Returns the estimated per-ledger rent cost in stroops based on storage footprint.
+    pub fn get_rent_estimate(env: Env) -> Result<i128, SLAError> {
+        storage_estimation::get_rent_estimate(&env)
     }
 
     // -------------------------------------------------------------------
