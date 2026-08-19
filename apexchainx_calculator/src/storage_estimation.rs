@@ -3,8 +3,8 @@
 //! Provides functions to calculate the byte size footprint of stored history entries
 //! and estimate per-ledger storage rent costs for administrators.
 
-use soroban_sdk::{Env, Map, Symbol, Vec};
 use crate::{SLAConfig, SLAError, CUSTOM_CONFIG_KEY, HISTORY_KEY};
+use soroban_sdk::{Env, Map, Symbol, Vec};
 
 /// Calculates the estimated total storage footprint (in bytes) of the contract,
 /// including fixed instance storage keys, history records, and custom severities.
@@ -32,9 +32,8 @@ pub fn get_storage_footprint_estimate(env: &Env) -> Result<u64, SLAError> {
     // Estimated byte size per custom severity entry (~150 bytes)
     let bytes_per_custom_severity: u64 = 150;
 
-    let footprint = base_bytes
-        + (history_len * bytes_per_history_entry)
-        + (custom_count * bytes_per_custom_severity);
+    let footprint =
+        base_bytes + (history_len * bytes_per_history_entry) + (custom_count * bytes_per_custom_severity);
 
     Ok(footprint)
 }
@@ -85,7 +84,12 @@ mod tests {
             symbol_short!("SF005"),
         ];
         for i in 0..5 {
-            client.calculate_sla(&operator, &outage_ids[i], &symbol_short!("critical"), &((i as u32) + 1));
+            client.calculate_sla(
+                &operator,
+                &outage_ids[i],
+                &symbol_short!("critical"),
+                &((i as u32) + 1),
+            );
         }
 
         let updated_footprint = client.get_storage_footprint_estimate();

@@ -48,7 +48,6 @@ pub mod history;
 pub mod history_snapshot;
 pub mod metadata;
 pub mod metrics;
-pub mod storage_estimation;
 /// Parity checker: compares current `compute_result` against the locked-in
 /// canonical golden vectors in `test_snapshots/tests/parity_baseline.json`.
 /// Run with `cargo test --lib parity_tests::` or `just parity-check`.
@@ -58,6 +57,7 @@ mod parity_tests;
 mod prune_benchmark;
 #[cfg(test)]
 mod schema_migration_tests;
+pub mod storage_estimation;
 #[cfg(test)]
 mod storage_footprint_tests;
 pub mod version_negotiation;
