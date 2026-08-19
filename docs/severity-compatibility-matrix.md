@@ -131,8 +131,13 @@ The following changes are **breaking** and require a contract upgrade:
 | Change | Impact |
 |---|---|
 | Registering a new custom severity | Only general bounds enforced; no effect on canonical functions |
-| Updating a custom severity's config | Same as registration path |
+| Updating a custom severity's config | Same as registration path; overwrites existing parameters in-place |
 | Reading custom snapshot | Pure view; no state mutation |
+
+### Custom Severity Lifecycle & Overwrite
+
+- **Registration & Overwrite**: Calling `set_custom_severity(admin, name, ...)` with a new custom severity registers it in `CUSTCFG`. Calling `set_custom_severity` with an already-registered custom severity name updates and overwrites its parameters (`threshold_minutes`, `penalty_per_minute`, `reward_base`) in-place.
+- **Event Emission**: Both initial registration and subsequent updates emit the canonical `cfg_upd` (`EVENT_CONFIG_UPD`) event carrying the custom severity symbol and new parameters. Backends should treat `cfg_upd` events for custom severities as upserts.
 
 ### Custom Breaking Changes
 

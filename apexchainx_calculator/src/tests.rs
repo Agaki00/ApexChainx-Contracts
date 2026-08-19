@@ -8976,3 +8976,31 @@ fn test_227_error_classification_count_matches_enum() {
         "Classification count mismatch — did you add an SLAError variant?"
     );
 }
+
+#[test]
+fn test_overwrite_existing_custom_severity_emits_event() {
+    let (env, client, actors) = setup();
+    let custom_sev = symbol_short!("tier1");
+
+    // Initial registration
+    client.set_custom_severity(&actors.admin, &custom_sev, &10, &50, &500);
+    let cfg1 = client.get_custom_severity(&custom_sev);
+    assert_eq!(cfg1.threshold_minutes, 10);
+
+    // Update existing custom severity (overwrite)
+    client.set_custom_severity(&actors.admin, &custom_sev, &15, &75, &600);
+    let cfg2 = client.get_custom_severity(&custom_sev);
+    assert_eq!(cfg2.threshold_minutes, 15);
+    assert_eq!(cfg2.penalty_per_minute, 75);
+    assert_eq!(cfg2.reward_base, 600);
+
+    // Verify EVENT_CONFIG_UPD event was emitted for the update
+    let events = env.events().all();
+    let (_, topics, data) = events.last().unwrap();
+    let topic_0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+    let topic_2: Symbol = topics.get(2).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(topic_0, EVENT_CONFIG_UPD);
+    assert_eq!(topic_2, custom_sev);
+    let payload: (u32, i128, i128) = data.try_into_val(&env).unwrap();
+    assert_eq!(payload, (15u32, 75i128, 600i128));
+}
