@@ -76,7 +76,7 @@ these.
 
 | Method | What it writes |
 |--------|----------------|
-| `calculate_sla` | Appends a result to history, updates cumulative stats and per-severity telemetry, emits `sla_calc` and `set_int` events. Idempotent on exact replay; rejects conflicting duplicates. |
+| `calculate_sla` | Appends a result to history, updates cumulative stats and per-severity telemetry, emits `sla_calc` and `set_int` events. Idempotent on exact replay; rejects conflicting duplicates with a `dup_input` event carrying the stored result. |
 
 ### Privileged — admin role
 

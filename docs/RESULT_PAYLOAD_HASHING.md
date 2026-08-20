@@ -167,12 +167,12 @@ The contract's idempotency policy for `calculate_sla`:
 
 - **Same inputs, same config** → Returns the original result (idempotent, no state change)
 - **Same inputs, different config** → New calculation replaces old entry
-- **Same outage_id, different inputs** → Returns `DuplicateOutageInput` error
+- **Same outage_id, different inputs** → Returns `DuplicateOutageInput` error and emits a `dup_input` event carrying the stored result
 
 ### 5.2 Backend Expectations
 
 - Backends should **deduplicate by `outage_id`** in their event streams
-- When a `DuplicateOutageInput` error is received, the backend should compare the existing result against the attempted submission
+- When a `DuplicateOutageInput` error is received, the backend should read the `dup_input` event from the rejected transaction to obtain the stored result and compare it against the attempted submission (no follow-up `get_latest_by_outage` call is required)
 - The `config_version_hash` is the key discriminator for determining whether a re-submission is truly a duplicate or a legitimate re-evaluation
 
 ---

@@ -26,6 +26,16 @@
 //! - payload:  (outage_id: Symbol, status: Symbol, payment_type: Symbol,
 //!   amount: i128, config_version_hash: u64, recorded_at: u64)
 //!
+//! ## dup_input (`dup_input`)
+//! Emitted when `calculate_sla` rejects a conflicting duplicate `outage_id`
+//! (the `DuplicateOutageInput` error path). Carries the previously stored
+//! `SLAResult` so consumers can reconcile the rejection without a separate
+//! `get_latest_by_outage` read. (#385)
+//! - topic[2]: severity Symbol
+//! - payload:  (outage_id: Symbol, status: Symbol, mttr_minutes: u32,
+//!   threshold_minutes: u32, amount: i128, payment_type: Symbol,
+//!   rating: Symbol, config_version_hash: u64, recorded_at: u64)
+//!
 //! ## cfg_upd (`cfg_upd`)
 //! Emitted on every successful `set_config` call.
 //! - topic[2]: severity Symbol
@@ -199,6 +209,8 @@ pub const EVENT_CONFIG_FREEZE: Symbol = symbol_short!("cfg_frz");
 pub const EVENT_CONFIG_UNFREEZE: Symbol = symbol_short!("cfg_unfrz");
 /// Emitted when a running-stats counter saturates. (SC-W5-047)
 pub const EVENT_STATS_SAT: Symbol = symbol_short!("stats_sat");
+/// Emitted on the `DuplicateOutageInput` error path with the stored result. (#385)
+pub const EVENT_DUP_INPUT: Symbol = symbol_short!("dup_input");
 pub const EVENT_MIGRATE_DONE: &str = "migrate_done";
 
 /// Returns the canonical event version string for consumer documentation.
@@ -237,6 +249,7 @@ mod tests {
             EVENT_CONFIG_FREEZE,
             EVENT_CONFIG_UNFREEZE,
             EVENT_STATS_SAT,
+            EVENT_DUP_INPUT,
         ];
 
         for i in 0..names.len() {
