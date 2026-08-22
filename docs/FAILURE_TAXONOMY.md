@@ -252,8 +252,9 @@
 | **Recovery** | Correct the input or wait for a config change |
 | **Consumer Impact** | The SLA calculation is rejected because the same `outage_id` was previously submitted with different inputs under the same configuration. |
 | **Emitted By** | `calculate_sla` |
+| **Event** | `dup_input` — emitted with the stored `SLAResult` before the error is returned |
 | **Recovery Strategy** | 1. Check whether the submitted `mttr_minutes` or severity level was entered incorrectly. 2. If the previous calculation was incorrect, admin must call `prune_history()` to remove the conflicting entry. 3. Alternatively, wait for a config update (changes the version hash and allows a fresh entry). 4. If the intent is genuinely a re-evaluation with different data under the same config, use a new unique `outage_id`. |
-| **Runbook** | 1. Call `get_history_by_outage(outage_id)` to inspect the conflicting entry. 2. If the previous entry is erroneous, admin calls `prune_history()`. 3. Re-submit with corrected data. |
+| **Runbook** | 1. Read the `dup_input` event from the rejected transaction to obtain the stored `SLAResult` (no follow-up `get_latest_by_outage` call is required). 2. If the previous entry is erroneous, admin calls `prune_history()`. 3. Re-submit with corrected data. |
 
 ---
 
@@ -326,7 +327,9 @@ def handle_calculate_sla(outage_id, severity, mttr):
             logger.warning(f"Contract paused: {pause_info.reason}")
             return retry_after_unpause()
         elif code == 13:  # DuplicateOutageInput
-            existing = contract.get_latest_by_outage(outage_id)
+            # The rejection transaction emitted a dup_input event carrying the
+            # stored result, so no follow-up contract read is required.
+            existing = extract_dup_input_event(transaction.events, outage_id)
             logger.warning(f"Duplicate outage {outage_id}: {existing}")
             return existing  # Return the previously stored result
         elif code == 19:  # OutageRecalcLimit
