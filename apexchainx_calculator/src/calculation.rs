@@ -28,9 +28,9 @@
 use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 use crate::{
-    SLAConfig, SLAError, SLAResult, SLAStats, SeverityTelemetry, EVENT_SETTLE_INTENT, EVENT_SLA_CALC,
-    EVENT_VERSION, HISTORY_KEY, LAST_CALCULATION_LEDGER_KEY, LAST_VIOLATION_LEDGER_KEY, MAX_HISTORY_SIZE,
-    MAX_RECALCS_PER_OUTAGE, PAUSED_KEY, RETENTION_LIMIT_KEY, SEVERITY_CALC_COUNTS_KEY,
+    SLAConfig, SLAError, SLAResult, SLAStats, SeverityTelemetry, EVENT_DUP_INPUT, EVENT_SETTLE_INTENT,
+    EVENT_SLA_CALC, EVENT_VERSION, HISTORY_KEY, LAST_CALCULATION_LEDGER_KEY, LAST_VIOLATION_LEDGER_KEY,
+    MAX_HISTORY_SIZE, MAX_RECALCS_PER_OUTAGE, PAUSED_KEY, RETENTION_LIMIT_KEY, SEVERITY_CALC_COUNTS_KEY,
     SEVERITY_VIOL_COUNTS_KEY, STATS_KEY,
 };
 
@@ -94,6 +94,10 @@ pub fn calculate_sla(
     if let Some(prev) = existing {
         if prev.config_version_hash == config_version_hash {
             if prev.mttr_minutes != mttr_minutes || prev.threshold_minutes != cfg.threshold_minutes {
+                // #385 – publish the stored result alongside the rejection so
+                // consumers can reconcile the conflict from this transaction's
+                // event log without a second get_latest_by_outage read.
+                publish_duplicate_input_event(env, severity.clone(), &prev);
                 return Err(SLAError::DuplicateOutageInput);
             }
             // Replay: return the stored decision without touching state.
@@ -438,6 +442,23 @@ fn publish_settlement_intent_event(env: &Env, severity: Symbol, result: &SLAResu
             result.amount,
             result.config_version_hash,
             result.recorded_at,
+        ),
+    );
+}
+
+fn publish_duplicate_input_event(env: &Env, severity: Symbol, existing: &SLAResult) {
+    env.events().publish(
+        (EVENT_DUP_INPUT, EVENT_VERSION, severity),
+        (
+            existing.outage_id.clone(),
+            existing.status.clone(),
+            existing.mttr_minutes,
+            existing.threshold_minutes,
+            existing.amount,
+            existing.payment_type.clone(),
+            existing.rating.clone(),
+            existing.config_version_hash,
+            existing.recorded_at,
         ),
     );
 }

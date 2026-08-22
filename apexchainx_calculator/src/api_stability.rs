@@ -100,10 +100,24 @@ pub fn sl_a_error_count() -> u32 {
 
 /// Returns the list of event name symbols that form the public event ABI.
 /// Backend listeners depend on these names never changing.
-pub fn event_name_symbols() -> [&'static str; 15] {
+pub fn event_name_symbols() -> [&'static str; 16] {
     [
-        "sla_calc", "set_int", "cfg_upd", "paused", "unpause", "op_set", "pruned", "pruned_a", "adm_prop",
-        "adm_acc", "adm_can", "adm_ren", "op_prop", "op_acc", "op_can",
+        "sla_calc",
+        "set_int",
+        "cfg_upd",
+        "paused",
+        "unpause",
+        "op_set",
+        "pruned",
+        "pruned_a",
+        "adm_prop",
+        "adm_acc",
+        "adm_can",
+        "adm_ren",
+        "op_prop",
+        "op_acc",
+        "op_can",
+        "dup_input",
     ]
 }
 
@@ -128,7 +142,7 @@ pub fn assess_stability() -> StabilityScore {
     }
 
     // Check event symbols are at expected count.
-    if event_name_symbols().len() != 15 {
+    if event_name_symbols().len() != 16 {
         return StabilityScore::C;
     }
 
@@ -188,7 +202,7 @@ mod tests {
     fn test_225_event_symbols_are_well_known() {
         // All public event names must be documented and stable.
         let events = event_name_symbols();
-        let expected = 15;
+        let expected = 16;
         assert_eq!(
             events.len(),
             expected,

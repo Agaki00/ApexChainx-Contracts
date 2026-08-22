@@ -6553,6 +6553,84 @@ fn test_255_duplicate_outage_id_with_different_mttr_panics() {
     );
 }
 
+// ============================================================
+// #385 – DuplicateOutageInput rejection carries the stored result
+// ============================================================
+//
+// Soroban contract errors (`#[contracterror]`) are unit-only u32 codes — they
+// cannot carry a payload. To satisfy "the existing result is retrievable from
+// the rejection itself", `calculate_sla` emits a `dup_input` event with the
+// full stored `SLAResult` immediately before returning the
+// `DuplicateOutageInput` error. Consumers read that event from the same
+// transaction instead of issuing a follow-up `get_latest_by_outage` call.
+
+#[test]
+fn test_385_conflicting_duplicate_emits_dup_input_with_stored_result() {
+    let (env, client, actors) = setup();
+    let outage_id = symbol_short!("DUP_EVT");
+    let severity = symbol_short!("high");
+
+    // First submission stores a result.
+    let stored = client.calculate_sla(&actors.operator, &outage_id, &severity, &10u32);
+
+    // Conflicting resubmission is rejected with DuplicateOutageInput.
+    let conflict_err = client
+        .try_calculate_sla(&actors.operator, &outage_id, &severity, &20u32)
+        .unwrap_err()
+        .unwrap();
+    assert!(error_responses::is_duplicate_outage_input(&conflict_err));
+
+    // The rejection must have emitted a dup_input event carrying the stored result.
+    let events = env.events().all();
+    let mut found = false;
+    for i in 0..events.len() {
+        let (_, topics, data) = events.get(i).unwrap();
+        let topic_0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        if topic_0 != EVENT_DUP_INPUT {
+            continue;
+        }
+        found = true;
+
+        let topic_1: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
+        let topic_2: Symbol = topics.get(2).unwrap().try_into_val(&env).unwrap();
+        assert_eq!(topic_1, EVENT_VERSION);
+        assert_eq!(topic_2, severity);
+
+        let payload: (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64) =
+            data.try_into_val(&env).unwrap();
+        assert_eq!(payload.0, outage_id);
+        assert_eq!(payload.1, stored.status);
+        assert_eq!(payload.2, stored.mttr_minutes);
+        assert_eq!(payload.3, stored.threshold_minutes);
+        assert_eq!(payload.4, stored.amount);
+        assert_eq!(payload.5, stored.payment_type);
+        assert_eq!(payload.6, stored.rating);
+        assert_eq!(payload.7, stored.config_version_hash);
+        assert_eq!(payload.8, stored.recorded_at);
+    }
+    assert!(found, "expected a dup_input event carrying the stored result");
+}
+
+#[test]
+fn test_385_exact_replay_does_not_emit_dup_input() {
+    let (env, client, actors) = setup();
+    let outage_id = symbol_short!("REPLAY_EV");
+    let severity = symbol_short!("high");
+
+    client.calculate_sla(&actors.operator, &outage_id, &severity, &10u32);
+
+    // Idempotent replay returns the stored result without emitting dup_input.
+    let replayed = client.calculate_sla(&actors.operator, &outage_id, &severity, &10u32);
+    assert_eq!(replayed.status, symbol_short!("met"));
+
+    let events = env.events().all();
+    for i in 0..events.len() {
+        let (_, topics, _) = events.get(i).unwrap();
+        let topic_0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        assert_ne!(topic_0, EVENT_DUP_INPUT, "exact replay must not emit dup_input");
+    }
+}
+
 #[test]
 fn test_config_bumped_duplicate_treated_as_fresh_calculation() {
     // After set_config changes the config_version_hash, a duplicate outage_id

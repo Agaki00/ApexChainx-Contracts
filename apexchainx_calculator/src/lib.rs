@@ -257,6 +257,11 @@ pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
 //              amount: i128, config_version_hash: u64, recorded_at: u64)
 //   context: severity Symbol
 //
+// dup_input → (outage_id: Symbol, status: Symbol, mttr_minutes: u32,
+//              threshold_minutes: u32, amount: i128, payment_type: Symbol,
+//              rating: Symbol, config_version_hash: u64, recorded_at: u64)
+//   context: severity Symbol
+//
 // stats_sat → (field: Symbol, previous_value: i128, attempted_increment: i128)
 //   context: counter_name Symbol
 // -----------------------------------------------------------------------
@@ -378,6 +383,17 @@ pub(crate) const EVENT_CONFIG_UNFREEZE: Symbol = symbol_short!("cfg_unfrz");
 /// without a version bump, as backend alerting pipelines parse this shape.
 pub(crate) const EVENT_STATS_SAT: Symbol = symbol_short!("stats_sat");
 
+/// Emitted when `calculate_sla` rejects a conflicting duplicate `outage_id`
+/// under an unchanged config version hash (the `DuplicateOutageInput` error
+/// path). Carries the previously stored `SLAResult` so consumers can reconcile
+/// the rejection without a separate `get_latest_by_outage` read. (#385)
+///
+/// Compatibility decision: payload mirrors the full `SLAResult` field order
+/// (outage_id, status, mttr_minutes, threshold_minutes, amount, payment_type,
+/// rating, config_version_hash, recorded_at). Field additions go at the end;
+/// reordering, removal, or type changes require a version bump.
+pub(crate) const EVENT_DUP_INPUT: Symbol = symbol_short!("dup_input");
+
 /// Canonical event version symbol used by all events.
 pub(crate) const EVENT_VERSION: Symbol = symbol_short!("v1");
 
@@ -454,6 +470,11 @@ pub enum SLAError {
     /// 3. If the intent is genuinely to re-evaluate the same outage under
     ///    the same config with different MTTR, the outage must receive a
     ///    new unique `outage_id`.
+    ///
+    /// The contract accompanies this error with a `dup_input` event
+    /// (`EVENT_DUP_INPUT`) carrying the previously stored `SLAResult`, so
+    /// consumers can read the conflicting result from the same transaction's
+    /// event log instead of issuing a follow-up `get_latest_by_outage` call.
     DuplicateOutageInput = 13,
     /// Computed penalty amount is invalid (e.g., overflowed to zero). (SC-W5-046)
     InvalidPenaltyAmount = 14,
@@ -2178,7 +2199,7 @@ impl SLACalculatorContract {
     /// | `ContractPaused` | Contract is currently paused |
     /// | `Unauthorized` | Caller is not the operator |
     /// | `ConfigNotFound` | No configuration exists for the requested severity |
-    /// | `DuplicateOutageInput` | Same `outage_id` submitted with conflicting inputs (see error docs) |
+    /// | `DuplicateOutageInput` | Same `outage_id` submitted with conflicting inputs; emits a `dup_input` event carrying the stored result |
     /// | `InvalidPenaltyAmount` | Penalty computation overflowed or produced a non-negative value |
     /// | `InvalidRewardAmount` | Reward computation overflowed or produced a non-positive value |
     /// Records an SLA decision for `outage_id`. Operator only.
@@ -2193,7 +2214,9 @@ impl SLACalculatorContract {
     ///    therefore free of state drift, however many times it is repeated.
     /// 2. **Conflict** — an unchanged config hash with a different MTTR or
     ///    threshold is rejected with `DuplicateOutageInput`, so a stored decision
-    ///    can never be silently restated.
+    ///    can never be silently restated. The rejection is accompanied by a
+    ///    `dup_input` event carrying the stored result, so consumers need no
+    ///    follow-up `get_latest_by_outage` read.
     /// 3. **Recalculation** — a changed config hash opens a new generation for the
     ///    outage, capped at `MAX_RECALCS_PER_OUTAGE` retained entries. Beyond that
     ///    the call is rejected with `OutageRecalcLimit`, bounding how much of the
@@ -2244,6 +2267,10 @@ impl SLACalculatorContract {
                 // Explicit duplicate policy: same outage_id is idempotent only when
                 // execution inputs resolve to the same deterministic result.
                 if prev.mttr_minutes != mttr_minutes || prev.threshold_minutes != cfg.threshold_minutes {
+                    // #385 – publish the stored result alongside the rejection so
+                    // consumers can reconcile the conflict from this transaction's
+                    // event log without a second get_latest_by_outage read.
+                    Self::publish_duplicate_input_event(&env, severity.clone(), &prev);
                     return Err(SLAError::DuplicateOutageInput);
                 }
                 // Replay: return the stored decision without touching state.
@@ -2861,6 +2888,23 @@ impl SLACalculatorContract {
                 result.amount,
                 result.config_version_hash,
                 result.recorded_at,
+            ),
+        );
+    }
+
+    fn publish_duplicate_input_event(env: &Env, severity: Symbol, existing: &SLAResult) {
+        env.events().publish(
+            (EVENT_DUP_INPUT, EVENT_VERSION, severity),
+            (
+                existing.outage_id.clone(),
+                existing.status.clone(),
+                existing.mttr_minutes,
+                existing.threshold_minutes,
+                existing.amount,
+                existing.payment_type.clone(),
+                existing.rating.clone(),
+                existing.config_version_hash,
+                existing.recorded_at,
             ),
         );
     }
