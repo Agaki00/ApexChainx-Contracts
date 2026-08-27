@@ -3039,12 +3039,6 @@ impl SLACalculatorContract {
             }
 
             env.storage().instance().set(&HISTORY_KEY, &new_history);
-            env.events().publish(
-                (EVENT_PRUNED, EVENT_VERSION, caller),
-                (remove_count, new_history.len()),
-            );
-        }
-
             remove_count
         } else {
             0
@@ -3275,7 +3269,7 @@ impl SLACalculatorContract {
         }
         env.storage().instance().set(&RETENTION_LIMIT_KEY, &limit);
         env.events()
-            .publish((EVENT_RET_LIM, EVENT_VERSION, caller), (limit,));
+            .publish((EVENT_RET_LIM, EVENT_VERSION, caller.clone()), (limit,));
         let history: Vec<SLAResult> = env
             .storage()
             .instance()

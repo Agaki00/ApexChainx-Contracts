@@ -13,11 +13,8 @@ use crate::{
 
 /// Upper bound on the number of entries a single pagination call may return.
 /// Limits above this are clamped so no single call can read the full retained
-/// history, enforcing the documented pagination policy server-side.
-const MAX_PAGE_SIZE: u32 = 200;
-
-/// Returns the full SLA calculation history.
-/// Default page size used to bound legacy full-history reads. (#409)
+/// history, enforcing the documented pagination policy server-side. Also
+/// used to bound legacy full-history reads. (#409)
 pub const MAX_PAGE_SIZE: u32 = 200;
 
 /// Returns a bounded slice of the SLA history (the most recent entries).
