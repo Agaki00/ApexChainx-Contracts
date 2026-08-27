@@ -126,7 +126,7 @@ pub fn event_name_symbols() -> [&'static str; 16] {
 pub fn storage_key_symbols() -> [&'static str; 17] {
     [
         "ADMIN", "OPERATOR", "PADMIN", "POP", "CONFIG", "CUSTCFG", "PAUSED", "PAUSEINF", "STATS", "CALCCNT",
-        "VIOLCNT", "CALCLDG", "VIOLLDG", "HIST", "VER", "RETLIM", "LCFGUPD",
+        "VIOLCNT", "CALCTS", "VIOLTS", "HIST", "VER", "RETLIM", "LCFGUPD",
     ]
 }
 

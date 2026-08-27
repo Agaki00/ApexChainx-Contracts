@@ -62,7 +62,7 @@ fn storage_key_count_is_stable_after_init() {
     // in lib.rs). Asserting presence pins the post-init footprint so accidental
     // additions or removals are caught.
     let eagerly_written: [&str; 11] = [
-        "ADMIN", "OPERATOR", "CONFIG", "PAUSED", "STATS", "CALCCNT", "VIOLCNT", "CALCLDG", "VIOLLDG", "HIST",
+        "ADMIN", "OPERATOR", "CONFIG", "PAUSED", "STATS", "CALCCNT", "VIOLCNT", "CALCTS", "VIOLTS", "HIST",
         "VER",
     ];
 
