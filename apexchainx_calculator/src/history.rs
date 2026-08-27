@@ -7,11 +7,14 @@
 use soroban_sdk::{Address, Env, Symbol, Vec};
 
 use crate::{
-    HistoryPage, SLAError, SLAResult, EVENT_PRUNED, EVENT_PRUNED_AGE, EVENT_VERSION, HISTORY_KEY,
-    MAX_HISTORY_SIZE, RETENTION_LIMIT_KEY,
+    HistoryPage, SLAError, SLAResult, EVENT_PRUNED, EVENT_PRUNED_AGE, EVENT_RET_LIM, EVENT_VERSION,
+    HISTORY_KEY, MAX_HISTORY_SIZE, RETENTION_LIMIT_KEY,
 };
 
-/// Default page size used to bound legacy full-history reads. (#409)
+/// Upper bound on the number of entries a single pagination call may return.
+/// Limits above this are clamped so no single call can read the full retained
+/// history, enforcing the documented pagination policy server-side. Also
+/// used to bound legacy full-history reads. (#409)
 pub const MAX_PAGE_SIZE: u32 = 200;
 
 /// Returns a bounded slice of the SLA history (the most recent entries).
@@ -57,9 +60,10 @@ pub fn prune_history(env: &Env, caller: &Address, keep_latest: u32) -> Result<()
         }
 
         env.storage().instance().set(&HISTORY_KEY, &new_history);
+        let kept = new_history.len();
         env.events().publish(
             (EVENT_PRUNED, EVENT_VERSION, caller.clone()),
-            (remove_count, keep_latest),
+            (remove_count, kept),
         );
     }
 
@@ -111,11 +115,11 @@ pub fn prune_history_by_age(env: &Env, caller: &Address, min_age_seconds: u64) -
 ///
 /// - `offset` is the 0-based index of the first entry to return. History is
 ///   stored oldest-first, so `offset = 0` is the earliest recorded result.
-/// - `limit` is the maximum number of entries returned per page. It is **not**
-///   clamped to an upper bound: the effective page is `min(limit, len - offset)`,
-///   so a page shorter than the requested `limit` signals end-of-history. A
-///   `limit` larger than the remaining history simply returns everything that
-///   remains.
+/// - `limit` is the maximum number of entries returned per page. It is clamped
+///   to an upper bound (`MAX_PAGE_SIZE`): the effective page is
+///   `min(min(limit, MAX_PAGE_SIZE), len - offset)`, so a page shorter than the
+///   requested `limit` signals end-of-history. A `limit` larger than the
+///   remaining history simply returns everything that remains.
 /// - An out-of-range `offset` (`offset >= len`) returns an **empty page**, not
 ///   an error — empty pages are the canonical end-of-history signal, so
 ///   consumers can loop until they see one without special-casing.
@@ -128,6 +132,7 @@ pub fn prune_history_by_age(env: &Env, caller: &Address, min_age_seconds: u64) -
 /// See `docs/HISTORY_PAGINATION_POLICY.md` for the full policy.
 pub fn get_history_page(env: &Env, offset: u32, limit: u32) -> Result<Vec<SLAResult>, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
+    let limit = limit.min(MAX_PAGE_SIZE);
     let history: Vec<SLAResult> = env
         .storage()
         .instance()
@@ -162,6 +167,7 @@ pub fn get_history_page(env: &Env, offset: u32, limit: u32) -> Result<Vec<SLARes
 /// `docs/HISTORY_PAGINATION_POLICY.md`.
 pub fn get_history_page_with_meta(env: &Env, offset: u32, limit: u32) -> Result<HistoryPage, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
+    let limit = limit.min(MAX_PAGE_SIZE);
     let history: Vec<SLAResult> = env
         .storage()
         .instance()
@@ -241,6 +247,8 @@ pub fn set_retention_limit(env: &Env, caller: &Address, limit: u32) -> Result<()
         return Err(SLAError::RetentionLimitOutOfRange);
     }
     env.storage().instance().set(&RETENTION_LIMIT_KEY, &limit);
+    env.events()
+        .publish((EVENT_RET_LIM, EVENT_VERSION, caller.clone()), (limit,));
     Ok(())
 }
 

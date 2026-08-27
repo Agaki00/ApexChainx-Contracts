@@ -177,6 +177,11 @@ pub(crate) const RESULT_SCHEMA_FIELD_COUNT: u32 = 9;
 /// Configurable down to 1 via set_retention_limit().
 pub(crate) const MAX_HISTORY_SIZE: u32 = 1000;
 
+/// Upper bound on the number of entries a single pagination call may return.
+/// Limits above this are clamped so no single call can read the full retained
+/// history, enforcing the documented pagination policy server-side.
+pub(crate) const MAX_PAGE_SIZE: u32 = 200;
+
 /// Anti-spam cap on how many retained history entries a single `outage_id` may
 /// occupy.
 ///
@@ -327,6 +332,12 @@ pub(crate) const EVENT_PRUNED: Symbol = symbol_short!("pruned");
 /// Compatibility decision: same shape as EVENT_PRUNED — intentional parallel.
 /// Field additions are safe; any structural change requires a version bump.
 pub(crate) const EVENT_PRUNED_AGE: Symbol = symbol_short!("pruned_a");
+
+/// Emitted when the retention limit is changed via set_retention_limit. (SC-013)
+///
+/// Compatibility decision: payload is `(new_limit: u32,)`. Appending fields is
+/// safe; changing the type requires a version bump.
+pub(crate) const EVENT_RET_LIM: Symbol = symbol_short!("ret_lim");
 
 /// Emitted when a new admin is proposed. (#63)
 ///
@@ -2165,6 +2176,20 @@ impl SLACalculatorContract {
             });
         }
 
+        let custom: Map<Symbol, SLAConfig> = env
+            .storage()
+            .instance()
+            .get(&CUSTOM_CONFIG_KEY)
+            .unwrap_or_else(|| Map::new(&env));
+        for (severity, _) in custom.iter() {
+            telemetry.push_back(SeverityTelemetry {
+                severity,
+                calculations: 0,
+                violations: 0,
+                violation_rate: 0,
+            });
+        }
+
         Ok(telemetry)
     }
 
@@ -3078,11 +3103,11 @@ impl SLACalculatorContract {
     ///
     /// - `offset` is the 0-based index of the first entry to return. History is
     ///   stored oldest-first, so `offset = 0` is the earliest recorded result.
-    /// - `limit` is the maximum number of entries returned per page. It is **not**
-    ///   clamped to an upper bound: the effective page is `min(limit, len - offset)`,
-    ///   so a page shorter than the requested `limit` signals end-of-history. A
-    ///   `limit` larger than the remaining history simply returns everything that
-    ///   remains.
+    /// - `limit` is the maximum number of entries returned per page. It is clamped
+    ///   to an upper bound (`MAX_PAGE_SIZE`): the effective page is
+    ///   `min(min(limit, MAX_PAGE_SIZE), len - offset)`, so a page shorter than the
+    ///   requested `limit` signals end-of-history. A `limit` larger than the
+    ///   remaining history simply returns everything that remains.
     /// - An out-of-range `offset` (`offset >= len`) returns an **empty page**, not
     ///   an error — empty pages are the canonical end-of-history signal, so
     ///   consumers can loop until they see one without special-casing.
@@ -3095,6 +3120,7 @@ impl SLACalculatorContract {
     /// See `docs/HISTORY_PAGINATION_POLICY.md` for the full policy.
     pub fn get_history_page(env: Env, offset: u32, limit: u32) -> Result<Vec<SLAResult>, SLAError> {
         Self::check_version(&env)?;
+        let limit = limit.min(MAX_PAGE_SIZE);
         let history: Vec<SLAResult> = env
             .storage()
             .instance()
@@ -3131,6 +3157,7 @@ impl SLACalculatorContract {
     /// `docs/HISTORY_PAGINATION_POLICY.md`.
     pub fn get_history_page_with_meta(env: Env, offset: u32, limit: u32) -> Result<HistoryPage, SLAError> {
         Self::check_version(&env)?;
+        let limit = limit.min(MAX_PAGE_SIZE);
         let history: Vec<SLAResult> = env
             .storage()
             .instance()
@@ -3241,6 +3268,8 @@ impl SLACalculatorContract {
             return Err(SLAError::RetentionLimitOutOfRange);
         }
         env.storage().instance().set(&RETENTION_LIMIT_KEY, &limit);
+        env.events()
+            .publish((EVENT_RET_LIM, EVENT_VERSION, caller.clone()), (limit,));
         let history: Vec<SLAResult> = env
             .storage()
             .instance()
