@@ -111,7 +111,7 @@ pub fn canonical_field_counts() -> [(&'static str, u32); 31] {
 /// Returns the count of `SLAError` variants. When a new error is added,
 /// this must be updated so the stability score reflects the change.
 pub fn sl_a_error_count() -> u32 {
-    19
+    21
 }
 
 /// Returns the list of event name symbols that form the public event ABI.
@@ -160,7 +160,7 @@ pub fn storage_key_symbols() -> [&'static str; 17] {
 /// values.
 pub fn assess_stability() -> StabilityScore {
     // Check error count against canonical value.
-    if sl_a_error_count() != 19 {
+    if sl_a_error_count() != 21 {
         return StabilityScore::C;
     }
 
@@ -240,7 +240,7 @@ mod tests {
         // Adding or removing an SLAError variant changes the error ABI.
         assert_eq!(
             sl_a_error_count(),
-            19,
+            21,
             "SLAError variant count changed — review error contract with backends"
         );
     }
@@ -350,14 +350,16 @@ mod tests {
     fn test_225_sla_error_count_consistent_with_lib_enum() {
         // The sl_a_error_count() function must match the SLAError enum.
         // We verify by checking that all known discriminants exist.
-        let discriminants: [u32; 19] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
+        let discriminants: [u32; 21] = [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+        ];
         assert_eq!(
             discriminants.len() as u32,
             sl_a_error_count(),
             "Discriminant count mismatches sl_a_error_count()"
         );
 
-        // Verify no gaps: discriminants must be 1..19
+        // Verify no gaps: discriminants must be 1..21
         for (i, d) in discriminants.iter().enumerate() {
             assert_eq!(*d, (i + 1) as u32, "Gap in SLAError discriminants at index {}", i);
         }

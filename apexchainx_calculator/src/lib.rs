@@ -510,7 +510,7 @@ pub enum SLAError {
     /// Pending admin/operator proposal has exceeded its expiry window.
     ProposalExpired = 20,
     /// Admin authority was permanently renounced — admin-gated calls are no longer possible. (#406)
-    AdminRenounced = 20,
+    AdminRenounced = 21,
 }
 
 // -----------------------------------------------------------------------
@@ -1765,7 +1765,7 @@ impl SLACalculatorContract {
 
         // Emit in numeric order for deterministic consumption
         // All descriptions must be <= 32 bytes (Soroban Symbol constraint)
-        let entries: [(u32, &str, &str); 20] = [
+        let entries: [(u32, &str, &str); 21] = [
             (1, "AlreadyInitialized", "Contract already initialized"),
             (2, "NotInitialized", "Contract not yet initialized"),
             (3, "Unauthorized", "Caller lacks required role"),
@@ -1786,7 +1786,7 @@ impl SLACalculatorContract {
             (18, "SeverityNotInSet", "Custom severity not registered"),
             (19, "OutageRecalcLimit", "Outage recalc limit reached"),
             (20, "ProposalExpired", "Proposal expired"),
-            (20, "AdminRenounced", "Admin authority renounced"),
+            (21, "AdminRenounced", "Admin authority renounced"),
         ];
 
         for (code, label, description) in entries {
