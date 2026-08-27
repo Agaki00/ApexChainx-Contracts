@@ -8762,9 +8762,56 @@ fn test_get_public_api_includes_all_major_methods() {
 fn test_get_public_api_method_count_is_stable() {
     let (_env, client, _actors) = setup();
     let api = client.get_public_api();
-    // 58 methods as of get_history_page_with_meta (#380).
+    // 61 methods as of get_contract_info/get_storage_footprint_estimate/
+    // get_rent_estimate being added to the descriptor (#418).
     // This test catches accidental additions or removals
-    assert_eq!(api.methods.len(), 58, "Public API method count changed");
+    assert_eq!(api.methods.len(), 61, "Public API method count changed");
+}
+
+#[test]
+fn test_get_public_api_includes_previously_missing_methods() {
+    // #418 – get_contract_info, get_storage_footprint_estimate, and
+    // get_rent_estimate must appear in the descriptor: a backend that
+    // validates the deployed API surface via get_public_api() must be able
+    // to discover them.
+    let (_env, client, _actors) = setup();
+    let api = client.get_public_api();
+
+    let mut found_get_contract_info = false;
+    let mut found_get_storage_footprint_estimate = false;
+    let mut found_get_rent_estimate = false;
+
+    for i in 0..api.methods.len() {
+        let method = api.methods.get(i).unwrap();
+        if method.name == Symbol::new(&_env, "get_contract_info") {
+            found_get_contract_info = true;
+            assert!(!method.mutates);
+            assert_eq!(method.auth, Symbol::new(&_env, "none"));
+        }
+        if method.name == Symbol::new(&_env, "get_storage_footprint_estimate") {
+            found_get_storage_footprint_estimate = true;
+            assert!(!method.mutates);
+            assert_eq!(method.auth, Symbol::new(&_env, "none"));
+        }
+        if method.name == Symbol::new(&_env, "get_rent_estimate") {
+            found_get_rent_estimate = true;
+            assert!(!method.mutates);
+            assert_eq!(method.auth, Symbol::new(&_env, "none"));
+        }
+    }
+
+    assert!(
+        found_get_contract_info,
+        "get_contract_info not found in API descriptor"
+    );
+    assert!(
+        found_get_storage_footprint_estimate,
+        "get_storage_footprint_estimate not found in API descriptor"
+    );
+    assert!(
+        found_get_rent_estimate,
+        "get_rent_estimate not found in API descriptor"
+    );
 }
 
 #[test]
