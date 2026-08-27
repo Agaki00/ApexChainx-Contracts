@@ -124,11 +124,11 @@ pub(crate) const SEVERITY_CALC_COUNTS_KEY: Symbol = symbol_short!("CALCCNT");
 /// Per-severity weekly violation counters for telemetry. (#101)
 pub(crate) const SEVERITY_VIOL_COUNTS_KEY: Symbol = symbol_short!("VIOLCNT");
 
-/// Per-severity last calculation ledger snapshot for weekly windowing. (#101)
-pub(crate) const LAST_CALCULATION_LEDGER_KEY: Symbol = symbol_short!("CALCLDG");
+/// Per-severity last calculation timestamp for weekly windowing. (#101)
+pub(crate) const LAST_CALCULATION_TS_KEY: Symbol = symbol_short!("CALCTS");
 
-/// Per-severity last violation ledger snapshot for weekly windowing. (#101)
-pub(crate) const LAST_VIOLATION_LEDGER_KEY: Symbol = symbol_short!("VIOLLDG");
+/// Per-severity last violation timestamp for weekly windowing. (#101)
+pub(crate) const LAST_VIOLATION_TS_KEY: Symbol = symbol_short!("VIOLTS");
 
 /// Ordered list of historical SLAResult entries.
 pub(crate) const HISTORY_KEY: Symbol = symbol_short!("HIST");
@@ -1052,8 +1052,8 @@ impl SLACalculatorContract {
         );
         env.storage().instance().set(&SEVERITY_CALC_COUNTS_KEY, &0u128);
         env.storage().instance().set(&SEVERITY_VIOL_COUNTS_KEY, &0u128);
-        env.storage().instance().set(&LAST_CALCULATION_LEDGER_KEY, &0u128);
-        env.storage().instance().set(&LAST_VIOLATION_LEDGER_KEY, &0u128);
+        env.storage().instance().set(&LAST_CALCULATION_TS_KEY, &0u128);
+        env.storage().instance().set(&LAST_VIOLATION_TS_KEY, &0u128);
         env.storage()
             .instance()
             .set(&HISTORY_KEY, &Vec::<SLAResult>::new(&env));
@@ -1128,12 +1128,12 @@ impl SLACalculatorContract {
             inst.set(&SEVERITY_VIOL_COUNTS_KEY, &0u128);
         }
 
-        if !inst.has(&LAST_CALCULATION_LEDGER_KEY) {
-            inst.set(&LAST_CALCULATION_LEDGER_KEY, &0u128);
+        if !inst.has(&LAST_CALCULATION_TS_KEY) {
+            inst.set(&LAST_CALCULATION_TS_KEY, &0u128);
         }
 
-        if !inst.has(&LAST_VIOLATION_LEDGER_KEY) {
-            inst.set(&LAST_VIOLATION_LEDGER_KEY, &0u128);
+        if !inst.has(&LAST_VIOLATION_TS_KEY) {
+            inst.set(&LAST_VIOLATION_TS_KEY, &0u128);
         }
 
         if !inst.has(&HISTORY_KEY) {
@@ -2816,8 +2816,8 @@ impl SLACalculatorContract {
         let index = Self::canonical_severity_index(severity).unwrap_or(0);
         let mut calculations = Self::load_counts(env, &SEVERITY_CALC_COUNTS_KEY);
         let mut violations = Self::load_counts(env, &SEVERITY_VIOL_COUNTS_KEY);
-        let mut last_calculations = Self::load_counts(env, &LAST_CALCULATION_LEDGER_KEY);
-        let mut last_violations = Self::load_counts(env, &LAST_VIOLATION_LEDGER_KEY);
+        let mut last_calculations = Self::load_counts(env, &LAST_CALCULATION_TS_KEY);
+        let mut last_violations = Self::load_counts(env, &LAST_VIOLATION_TS_KEY);
 
         let now = env.ledger().timestamp();
         let week_seconds = 7u64 * 24u64 * 60u64 * 60u64;
@@ -2843,14 +2843,14 @@ impl SLACalculatorContract {
             );
         }
 
-        let current_ledger = if now > u64::from(u32::MAX) {
+        let current_ts = if now > u64::from(u32::MAX) {
             u32::MAX
         } else {
             now as u32
         };
-        last_calculations = Self::set_count_lane(last_calculations, index, current_ledger);
+        last_calculations = Self::set_count_lane(last_calculations, index, current_ts);
         if !met {
-            last_violations = Self::set_count_lane(last_violations, index, current_ledger);
+            last_violations = Self::set_count_lane(last_violations, index, current_ts);
         }
 
         env.storage()
@@ -2861,10 +2861,10 @@ impl SLACalculatorContract {
             .set(&SEVERITY_VIOL_COUNTS_KEY, &violations);
         env.storage()
             .instance()
-            .set(&LAST_CALCULATION_LEDGER_KEY, &last_calculations);
+            .set(&LAST_CALCULATION_TS_KEY, &last_calculations);
         env.storage()
             .instance()
-            .set(&LAST_VIOLATION_LEDGER_KEY, &last_violations);
+            .set(&LAST_VIOLATION_TS_KEY, &last_violations);
     }
 
     fn publish_sla_event(env: &Env, severity: Symbol, result: &SLAResult) {
@@ -2940,7 +2940,7 @@ impl SLACalculatorContract {
             .unwrap_or_else(|| Vec::new(&env));
         let len = history.len();
 
-        if len > keep_latest {
+        let remove_count = if len > keep_latest {
             let remove_count = len - keep_latest;
             let mut new_history = Vec::new(&env);
 
@@ -2950,10 +2950,12 @@ impl SLACalculatorContract {
             }
 
             env.storage().instance().set(&HISTORY_KEY, &new_history);
-            env.events()
-                .publish((EVENT_PRUNED, EVENT_VERSION, caller), (remove_count, keep_latest));
-        }
-
+            remove_count
+        } else {
+            0
+        };
+        env.events()
+            .publish((EVENT_PRUNED, EVENT_VERSION, caller), (remove_count, keep_latest));
         Ok(())
     }
 
@@ -2988,11 +2990,11 @@ impl SLACalculatorContract {
         }
 
         if removed > 0 {
-            let kept = new_history.len();
             env.storage().instance().set(&HISTORY_KEY, &new_history);
-            env.events()
-                .publish((EVENT_PRUNED_AGE, EVENT_VERSION, caller), (removed, kept));
         }
+        let kept = new_history.len();
+        env.events()
+            .publish((EVENT_PRUNED_AGE, EVENT_VERSION, caller), (removed, kept));
 
         Ok(())
     }
@@ -3126,10 +3128,11 @@ impl SLACalculatorContract {
             .get(&HISTORY_KEY)
             .unwrap_or_else(|| Vec::new(&env));
         let mut latest: Option<SLAResult> = None;
-        for i in 0..history.len() {
+        for i in (0..history.len()).rev() {
             let entry = history.get(i).unwrap();
             if entry.outage_id == outage_id {
                 latest = Some(entry);
+                break;
             }
         }
         Ok(latest)
@@ -3174,6 +3177,22 @@ impl SLACalculatorContract {
             return Err(SLAError::RetentionLimitOutOfRange);
         }
         env.storage().instance().set(&RETENTION_LIMIT_KEY, &limit);
+        let history: Vec<SLAResult> = env
+            .storage()
+            .instance()
+            .get(&HISTORY_KEY)
+            .unwrap_or_else(|| Vec::new(&env));
+        let len = history.len();
+        if len > limit {
+            let remove_count = len - limit;
+            let mut new_history = Vec::new(&env);
+            for i in remove_count..len {
+                new_history.push_back(history.get(i).unwrap());
+            }
+            env.storage().instance().set(&HISTORY_KEY, &new_history);
+            env.events()
+                .publish((EVENT_PRUNED, EVENT_VERSION, caller), (remove_count, limit));
+        }
         Ok(())
     }
 

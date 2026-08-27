@@ -426,8 +426,8 @@ fn test_storage_key_namespace_symbols_are_distinct() {
     //   STATS_KEY                  = "STATS"
     //   SEVERITY_CALC_COUNTS_KEY   = "CALCCNT"
     //   SEVERITY_VIOL_COUNTS_KEY   = "VIOLCNT"
-    //   LAST_CALCULATION_LEDGER_KEY= "CALCLDG"
-    //   LAST_VIOLATION_LEDGER_KEY  = "VIOLLDG"
+    //   LAST_CALCULATION_TS_KEY     = "CALCTS"
+    //   LAST_VIOLATION_TS_KEY       = "VIOLTS"
     //   HISTORY_KEY                = "HIST"
     //   STORAGE_VERSION_KEY        = "VER"
     //   RETENTION_LIMIT_KEY        = "RETLIM"
@@ -445,8 +445,8 @@ fn test_storage_key_namespace_symbols_are_distinct() {
         STATS_KEY,
         SEVERITY_CALC_COUNTS_KEY,
         SEVERITY_VIOL_COUNTS_KEY,
-        LAST_CALCULATION_LEDGER_KEY,
-        LAST_VIOLATION_LEDGER_KEY,
+        LAST_CALCULATION_TS_KEY,
+        LAST_VIOLATION_TS_KEY,
         HISTORY_KEY,
         STORAGE_VERSION_KEY,
         RETENTION_LIMIT_KEY,
@@ -4028,12 +4028,9 @@ fn test_retention_limit_drops_oldest_when_exceeded() {
 }
 
 #[test]
-fn test_retention_limit_update_takes_effect_on_next_calculate() {
-    // The retention limit only prevents growth beyond the cap; it does not
-    // retroactively shrink existing history. When the limit is lowered below
-    // the current history size, each subsequent calculate_sla call pushes one
-    // entry and drops one (net zero change) until the history naturally drains
-    // to the new limit via prune_history or prune_history_by_age.
+fn test_retention_limit_update_trims_existing_history() {
+    // Lowering the retention limit immediately trims existing history to the
+    // new limit and emits the prune event; raising it never trims.
     let env = Env::default();
     env.mock_all_auths();
     env.budget().reset_unlimited();
@@ -4051,32 +4048,25 @@ fn test_retention_limit_update_takes_effect_on_next_calculate() {
     }
     assert_eq!(client.get_history().len(), 10);
 
-    // Lower the limit; existing history is not pruned automatically
+    // Raise the limit first; nothing is trimmed.
+    client.set_retention_limit(&admin, &20);
+    assert_eq!(client.get_history().len(), 10, "Raising the limit must not prune");
+
+    // Lower the limit; existing history is trimmed immediately to 5.
     client.set_retention_limit(&admin, &5);
     assert_eq!(
         client.get_history().len(),
-        10,
-        "Lowering limit must not retroactively prune"
-    );
-
-    // Each calculate_sla call pushes 1 and drops 1 (net zero) while history > limit.
-    // History stays at 10 until an explicit prune brings it to the new limit.
-    client.calculate_sla(&op, &symbol_short!("AFT"), &symbol_short!("low"), &10);
-    assert_eq!(
-        client.get_history().len(),
-        10,
-        "History stays at 10 (push 1, drop 1)"
-    );
-
-    // Explicit prune brings history down to the new limit
-    client.prune_history(&admin, &5);
-    assert_eq!(
-        client.get_history().len(),
         5,
-        "Explicit prune must enforce the new limit"
+        "Lowering the limit must trim existing history immediately"
     );
 
-    // Now the cap is active: further calculations stay at 5
+    // The trim emits the prune event (removed=5, kept=5).
+    let events = env.events().all();
+    let (_, _, data) = events.last().unwrap();
+    let payload: (u32, u32) = data.try_into_val(&env).unwrap();
+    assert_eq!(payload, (5u32, 5u32));
+
+    // The cap is active: further calculations stay at 5.
     client.calculate_sla(&op, &symbol_short!("CAP"), &symbol_short!("low"), &10);
     assert_eq!(
         client.get_history().len(),
