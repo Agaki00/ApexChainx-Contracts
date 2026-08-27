@@ -419,6 +419,8 @@ fn test_storage_key_namespace_symbols_are_distinct() {
     //   OPERATOR_KEY               = "OPERATOR"
     //   PENDING_ADMIN_KEY          = "PADMIN"
     //   PENDING_OP_KEY             = "POP"
+    //   PENDING_ADMIN_TS_KEY       = "PADMINTS"
+    //   PENDING_OP_TS_KEY          = "POPTS"
     //   CONFIG_KEY                 = "CONFIG"
     //   CUSTOM_CONFIG_KEY          = "CUSTCFG"
     //   PAUSED_KEY                 = "PAUSED"
@@ -438,6 +440,8 @@ fn test_storage_key_namespace_symbols_are_distinct() {
         OPERATOR_KEY,
         PENDING_ADMIN_KEY,
         PENDING_OP_KEY,
+        PENDING_ADMIN_TS_KEY,
+        PENDING_OP_TS_KEY,
         CONFIG_KEY,
         CUSTOM_CONFIG_KEY,
         PAUSED_KEY,
@@ -8439,6 +8443,7 @@ fn test_failure_catalog_matches_error_helpers() {
         SLAError::InvalidInput,
         SLAError::SeverityNotInSet,
         SLAError::OutageRecalcLimit,
+        SLAError::ProposalExpired,
     ];
 
     for err in all_variants {
@@ -8462,6 +8467,7 @@ fn test_failure_catalog_matches_error_helpers() {
             SLAError::InvalidInput => error_responses::is_invalid_input(&err),
             SLAError::SeverityNotInSet => error_responses::is_severity_not_in_set(&err),
             SLAError::OutageRecalcLimit => error_responses::is_outage_recalc_limit(&err),
+            SLAError::ProposalExpired => error_responses::is_proposal_expired(&err),
         };
         assert!(
             recognized,

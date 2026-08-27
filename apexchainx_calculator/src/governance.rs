@@ -5,13 +5,30 @@
 //! All functions require the appropriate role authorization and emit versioned
 //! governance events for backend audit trails.
 
-use soroban_sdk::{Address, Env};
+use soroban_sdk::{Address, Env, Symbol};
 
 use crate::{
     SLAError, ADMIN_KEY, EVENT_ADMIN_ACC, EVENT_ADMIN_CAN, EVENT_ADMIN_PROP, EVENT_ADMIN_REN, EVENT_OP_ACC,
     EVENT_OP_CAN, EVENT_OP_PROP, EVENT_OP_SET, EVENT_VERSION, OPERATOR_KEY, PENDING_ADMIN_KEY,
-    PENDING_OP_KEY,
+    PENDING_ADMIN_TS_KEY, PENDING_OP_KEY, PENDING_OP_TS_KEY,
 };
+
+/// Window (in ledger seconds) after which a pending proposal expires.
+const PROPOSAL_EXPIRY_WINDOW: u64 = 90 * 24 * 60 * 60;
+
+/// Requires that the stored proposal is still within its expiry window.
+fn require_proposal_valid(env: &Env, ts_key: Symbol) -> Result<(), SLAError> {
+    let proposed: u64 = env
+        .storage()
+        .instance()
+        .get(&ts_key)
+        .ok_or(SLAError::NoPendingTransfer)?;
+    let now = env.ledger().timestamp();
+    if now.saturating_sub(proposed) > PROPOSAL_EXPIRY_WINDOW {
+        return Err(SLAError::ProposalExpired);
+    }
+    Ok(())
+}
 
 /// Proposes a new admin. The current admin initiates; the new admin must
 /// call `accept_admin` to complete the transfer.
@@ -20,6 +37,7 @@ pub fn propose_admin(env: &Env, caller: &Address, new_admin: &Address) -> Result
     crate::config_freeze::require_not_frozen(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
     env.storage().instance().set(&PENDING_ADMIN_KEY, new_admin);
+    env.storage().instance().set(&PENDING_ADMIN_TS_KEY, &env.ledger().timestamp());
     env.events().publish(
         (EVENT_ADMIN_PROP, EVENT_VERSION, caller.clone()),
         (new_admin.clone(),),
@@ -37,11 +55,13 @@ pub fn accept_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
         .instance()
         .get(&PENDING_ADMIN_KEY)
         .ok_or(SLAError::NoPendingTransfer)?;
+    require_proposal_valid(env, PENDING_ADMIN_TS_KEY)?;
     if *caller != pending {
         return Err(SLAError::Unauthorized);
     }
     env.storage().instance().set(&ADMIN_KEY, caller);
     env.storage().instance().remove(&PENDING_ADMIN_KEY);
+    env.storage().instance().remove(&PENDING_ADMIN_TS_KEY);
     env.events()
         .publish((EVENT_ADMIN_ACC, EVENT_VERSION, caller.clone()), ());
     Ok(())
@@ -56,6 +76,7 @@ pub fn cancel_admin_proposal(env: &Env, caller: &Address) -> Result<(), SLAError
         return Err(SLAError::NoPendingTransfer);
     }
     env.storage().instance().remove(&PENDING_ADMIN_KEY);
+    env.storage().instance().remove(&PENDING_ADMIN_TS_KEY);
     env.events()
         .publish((EVENT_ADMIN_CAN, EVENT_VERSION, caller.clone()), ());
     Ok(())
@@ -74,6 +95,7 @@ pub fn propose_operator(env: &Env, caller: &Address, new_operator: &Address) -> 
     crate::config_freeze::require_not_frozen(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
     env.storage().instance().set(&PENDING_OP_KEY, new_operator);
+    env.storage().instance().set(&PENDING_OP_TS_KEY, &env.ledger().timestamp());
     env.events().publish(
         (EVENT_OP_PROP, EVENT_VERSION, caller.clone()),
         (new_operator.clone(),),
@@ -91,11 +113,13 @@ pub fn accept_operator(env: &Env, caller: &Address) -> Result<(), SLAError> {
         .instance()
         .get(&PENDING_OP_KEY)
         .ok_or(SLAError::NoPendingTransfer)?;
+    require_proposal_valid(env, PENDING_OP_TS_KEY)?;
     if *caller != pending {
         return Err(SLAError::Unauthorized);
     }
     env.storage().instance().set(&OPERATOR_KEY, caller);
     env.storage().instance().remove(&PENDING_OP_KEY);
+    env.storage().instance().remove(&PENDING_OP_TS_KEY);
     env.events()
         .publish((EVENT_OP_ACC, EVENT_VERSION, caller.clone()), ());
     Ok(())
@@ -110,6 +134,7 @@ pub fn cancel_operator_proposal(env: &Env, caller: &Address) -> Result<(), SLAEr
         return Err(SLAError::NoPendingTransfer);
     }
     env.storage().instance().remove(&PENDING_OP_KEY);
+    env.storage().instance().remove(&PENDING_OP_TS_KEY);
     env.events()
         .publish((EVENT_OP_CAN, EVENT_VERSION, caller.clone()), ());
     Ok(())
@@ -128,6 +153,7 @@ pub fn renounce_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::require_admin(env, caller)?;
     env.storage().instance().remove(&ADMIN_KEY);
     env.storage().instance().remove(&PENDING_ADMIN_KEY);
+    env.storage().instance().remove(&PENDING_ADMIN_TS_KEY);
     env.events()
         .publish((EVENT_ADMIN_REN, EVENT_VERSION, caller.clone()), ());
     Ok(())

@@ -193,6 +193,8 @@ pub const EVENT_VERSION: Symbol = symbol_short!("v1");
 pub const EVENT_SLA_CALC: Symbol = symbol_short!("sla_calc");
 pub const EVENT_SETTLE_INTENT: Symbol = symbol_short!("set_int");
 pub const EVENT_CONFIG_UPD: Symbol = symbol_short!("cfg_upd");
+/// Emitted when a custom severity is removed via remove_custom_severity.
+pub const EVENT_CONFIG_REM: Symbol = symbol_short!("cfg_rem");
 pub const EVENT_PAUSED: Symbol = symbol_short!("paused");
 pub const EVENT_UNPAUSED: Symbol = symbol_short!("unpause");
 pub const EVENT_OP_SET: Symbol = symbol_short!("op_set");
@@ -234,6 +236,7 @@ mod tests {
             EVENT_SLA_CALC,
             EVENT_SETTLE_INTENT,
             EVENT_CONFIG_UPD,
+            EVENT_CONFIG_REM,
             EVENT_PAUSED,
             EVENT_UNPAUSED,
             EVENT_OP_SET,
