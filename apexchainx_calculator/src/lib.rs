@@ -60,6 +60,7 @@ mod schema_migration_tests;
 pub mod storage_estimation;
 #[cfg(test)]
 mod storage_footprint_tests;
+pub mod storage_version;
 pub mod version_negotiation;
 
 use crate::audit_state::AuditState;
@@ -1933,6 +1934,7 @@ impl SLACalculatorContract {
         methods.push_back(method("get_config_count", false, "none", ""));
         methods.push_back(method("get_config_snapshot", false, "none", ""));
         methods.push_back(method("get_config_version_hash", false, "none", ""));
+        methods.push_back(method("get_contract_info", false, "none", ""));
         methods.push_back(method("get_contract_metadata", false, "none", ""));
         methods.push_back(method("get_contract_state_fingerprint", false, "none", ""));
         methods.push_back(method("get_custom_config_snapshot", false, "none", ""));
@@ -1952,10 +1954,12 @@ impl SLACalculatorContract {
         methods.push_back(method("get_pending_admin", false, "none", ""));
         methods.push_back(method("get_pending_operator", false, "none", ""));
         methods.push_back(method("get_public_api", false, "none", ""));
+        methods.push_back(method("get_rent_estimate", false, "none", ""));
         methods.push_back(method("get_result_schema", false, "none", ""));
         methods.push_back(method("get_retention_limit", false, "none", ""));
         methods.push_back(method("get_severity_telemetry", false, "none", ""));
         methods.push_back(method("get_stats", false, "none", ""));
+        methods.push_back(method("get_storage_footprint_estimate", false, "none", ""));
         methods.push_back(method("get_storage_version", false, "none", ""));
         methods.push_back(method("get_version_info", false, "none", ""));
         // Health:

@@ -70,7 +70,7 @@ impl StabilityScore {
 /// **Maintainer note:** When adding or removing a field from any of these
 /// structs, update the corresponding count here AND bump the relevant
 /// schema version constant.
-pub fn canonical_field_counts() -> [(&'static str, u32); 17] {
+pub fn canonical_field_counts() -> [(&'static str, u32); 31] {
     [
         ("SLAConfig", 3),
         ("SLAResult", 9),
@@ -89,6 +89,22 @@ pub fn canonical_field_counts() -> [(&'static str, u32); 17] {
         ("FailureCode", 3),
         ("FailureSchema", 2),
         ("HealthcheckResult", 3),
+        ("ConfigBundle", 2),
+        ("AuditState", 10),
+        ("ContractInfo", 11),
+        ("HistoryPage", 3),
+        ("PublicApiMethod", 4),
+        ("PublicApiDescriptor", 3),
+        ("SeverityAliasMapping", 4),
+        ("ContractStateFingerprint", 8),
+        ("VersionNegotiationInfo", 6),
+        // NegotiationOutcome is a fieldless enum; the count tracks its
+        // variant count instead so a new outcome still trips the guardrail.
+        ("NegotiationOutcome", 3),
+        ("VersionMismatchDetail", 3),
+        ("VersionNegotiationResult", 3),
+        ("HistoryRetentionMetrics", 6),
+        ("CompensationAction", 2),
     ]
 }
 
@@ -100,7 +116,10 @@ pub fn sl_a_error_count() -> u32 {
 
 /// Returns the list of event name symbols that form the public event ABI.
 /// Backend listeners depend on these names never changing.
-pub fn event_name_symbols() -> [&'static str; 16] {
+///
+/// **Maintainer note:** This must cover every event constant declared in
+/// `event_schema.rs`. When a new event name is added there, add it here too.
+pub fn event_name_symbols() -> [&'static str; 20] {
     [
         "sla_calc",
         "set_int",
@@ -117,7 +136,11 @@ pub fn event_name_symbols() -> [&'static str; 16] {
         "op_prop",
         "op_acc",
         "op_can",
+        "cfg_frz",
+        "cfg_unfrz",
+        "stats_sat",
         "dup_input",
+        "migrate_done",
     ]
 }
 
@@ -142,7 +165,7 @@ pub fn assess_stability() -> StabilityScore {
     }
 
     // Check event symbols are at expected count.
-    if event_name_symbols().len() != 16 {
+    if event_name_symbols().len() != 20 {
         return StabilityScore::C;
     }
 
@@ -152,7 +175,7 @@ pub fn assess_stability() -> StabilityScore {
     }
 
     // Check canonical field counts have expected number of entries.
-    if canonical_field_counts().len() != 17 {
+    if canonical_field_counts().len() != 31 {
         return StabilityScore::C;
     }
 
@@ -186,6 +209,30 @@ mod tests {
             9,
             "SLAResult field count changed — bump RESULT_SCHEMA_VERSION"
         );
+
+        // ContractInfo.schema_version is the explicit handshake backends rely
+        // on to detect layout drift; the guardrail must track it directly.
+        let contract_info = counts.iter().find(|(name, _)| *name == "ContractInfo");
+        assert!(
+            contract_info.is_some(),
+            "ContractInfo must be in canonical_field_counts"
+        );
+        assert_eq!(
+            contract_info.unwrap().1,
+            11,
+            "ContractInfo field count changed — bump CONTRACT_INFO_SCHEMA_VERSION"
+        );
+
+        let audit_state = counts.iter().find(|(name, _)| *name == "AuditState");
+        assert!(
+            audit_state.is_some(),
+            "AuditState must be in canonical_field_counts"
+        );
+        assert_eq!(
+            audit_state.unwrap().1,
+            10,
+            "AuditState field count changed — review with backend consumers"
+        );
     }
 
     #[test]
@@ -202,7 +249,7 @@ mod tests {
     fn test_225_event_symbols_are_well_known() {
         // All public event names must be documented and stable.
         let events = event_name_symbols();
-        let expected = 16;
+        let expected = 20;
         assert_eq!(
             events.len(),
             expected,
@@ -215,6 +262,60 @@ mod tests {
                 assert_ne!(events[i], events[j], "Duplicate event name: {}", events[i]);
             }
         }
+    }
+
+    #[test]
+    fn test_event_name_symbols_matches_event_schema_catalog() {
+        // Guards against event_schema.rs gaining (or losing) an event name
+        // constant without a matching update to event_name_symbols(). If
+        // this fails, sync the two lists.
+        use soroban_sdk::{Env, Symbol};
+
+        let env = Env::default();
+        let schema_symbols = [
+            crate::event_schema::EVENT_SLA_CALC,
+            crate::event_schema::EVENT_SETTLE_INTENT,
+            crate::event_schema::EVENT_CONFIG_UPD,
+            crate::event_schema::EVENT_PAUSED,
+            crate::event_schema::EVENT_UNPAUSED,
+            crate::event_schema::EVENT_OP_SET,
+            crate::event_schema::EVENT_PRUNED,
+            crate::event_schema::EVENT_PRUNED_AGE,
+            crate::event_schema::EVENT_ADMIN_PROP,
+            crate::event_schema::EVENT_ADMIN_ACC,
+            crate::event_schema::EVENT_ADMIN_CAN,
+            crate::event_schema::EVENT_ADMIN_REN,
+            crate::event_schema::EVENT_OP_PROP,
+            crate::event_schema::EVENT_OP_ACC,
+            crate::event_schema::EVENT_OP_CAN,
+            crate::event_schema::EVENT_CONFIG_FREEZE,
+            crate::event_schema::EVENT_CONFIG_UNFREEZE,
+            crate::event_schema::EVENT_STATS_SAT,
+            crate::event_schema::EVENT_DUP_INPUT,
+        ];
+
+        let guardrail = event_name_symbols();
+        assert_eq!(
+            guardrail.len(),
+            schema_symbols.len() + 1, // + EVENT_MIGRATE_DONE, which is a &str constant
+            "event_name_symbols() length diverged from event_schema.rs's constant count"
+        );
+
+        for sym in schema_symbols {
+            let found = guardrail
+                .iter()
+                .any(|name| Symbol::new(&env, name) == sym);
+            assert!(
+                found,
+                "event_schema symbol {:?} is missing from event_name_symbols()",
+                sym
+            );
+        }
+
+        assert!(
+            guardrail.contains(&crate::event_schema::EVENT_MIGRATE_DONE),
+            "event_schema::EVENT_MIGRATE_DONE is missing from event_name_symbols()"
+        );
     }
 
     #[test]
