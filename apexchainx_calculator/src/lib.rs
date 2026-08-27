@@ -1592,7 +1592,8 @@ impl SLACalculatorContract {
         custom.remove(severity.clone());
         env.storage().instance().set(&CUSTOM_CONFIG_KEY, &custom);
 
-        env.events().publish((EVENT_CONFIG_REM, EVENT_VERSION, severity), ());
+        env.events()
+            .publish((EVENT_CONFIG_REM, EVENT_VERSION, severity), ());
         Ok(())
     }
 

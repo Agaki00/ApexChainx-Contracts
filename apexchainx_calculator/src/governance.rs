@@ -37,7 +37,9 @@ pub fn propose_admin(env: &Env, caller: &Address, new_admin: &Address) -> Result
     crate::config_freeze::require_not_frozen(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
     env.storage().instance().set(&PENDING_ADMIN_KEY, new_admin);
-    env.storage().instance().set(&PENDING_ADMIN_TS_KEY, &env.ledger().timestamp());
+    env.storage()
+        .instance()
+        .set(&PENDING_ADMIN_TS_KEY, &env.ledger().timestamp());
     env.events().publish(
         (EVENT_ADMIN_PROP, EVENT_VERSION, caller.clone()),
         (new_admin.clone(),),
@@ -95,7 +97,9 @@ pub fn propose_operator(env: &Env, caller: &Address, new_operator: &Address) -> 
     crate::config_freeze::require_not_frozen(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
     env.storage().instance().set(&PENDING_OP_KEY, new_operator);
-    env.storage().instance().set(&PENDING_OP_TS_KEY, &env.ledger().timestamp());
+    env.storage()
+        .instance()
+        .set(&PENDING_OP_TS_KEY, &env.ledger().timestamp());
     env.events().publish(
         (EVENT_OP_PROP, EVENT_VERSION, caller.clone()),
         (new_operator.clone(),),
