@@ -302,9 +302,7 @@ mod tests {
         );
 
         for sym in schema_symbols {
-            let found = guardrail
-                .iter()
-                .any(|name| Symbol::new(&env, name) == sym);
+            let found = guardrail.iter().any(|name| Symbol::new(&env, name) == sym);
             assert!(
                 found,
                 "event_schema symbol {:?} is missing from event_name_symbols()",

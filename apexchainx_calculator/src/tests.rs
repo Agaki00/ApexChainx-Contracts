@@ -8800,12 +8800,18 @@ fn test_get_public_api_includes_previously_missing_methods() {
         }
     }
 
-    assert!(found_get_contract_info, "get_contract_info not found in API descriptor");
+    assert!(
+        found_get_contract_info,
+        "get_contract_info not found in API descriptor"
+    );
     assert!(
         found_get_storage_footprint_estimate,
         "get_storage_footprint_estimate not found in API descriptor"
     );
-    assert!(found_get_rent_estimate, "get_rent_estimate not found in API descriptor");
+    assert!(
+        found_get_rent_estimate,
+        "get_rent_estimate not found in API descriptor"
+    );
 }
 
 #[test]

@@ -55,13 +55,19 @@ mod tests {
     #[test]
     fn test_storage_version_unset_returns_none() {
         let env = Env::default();
-        assert_eq!(read_storage_version(&env), None);
+        let cid = env.register_contract(None, crate::SLACalculatorContract);
+        env.as_contract(&cid, || {
+            assert_eq!(read_storage_version(&env), None);
+        });
     }
 
     #[test]
     fn test_migration_incomplete_when_unset() {
         let env = Env::default();
-        assert!(!is_migration_complete(&env));
+        let cid = env.register_contract(None, crate::SLACalculatorContract);
+        env.as_contract(&cid, || {
+            assert!(!is_migration_complete(&env));
+        });
     }
 
     #[test]
