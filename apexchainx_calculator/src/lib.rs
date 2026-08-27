@@ -1681,7 +1681,10 @@ impl SLACalculatorContract {
     }
 
     /// Returns the config snapshot recorded for a given version hash, if any. (#408)
-    pub fn get_config_snapshot_by_version(env: Env, hash: u64) -> Result<Option<SLAConfigSnapshot>, SLAError> {
+    pub fn get_config_snapshot_by_version(
+        env: Env,
+        hash: u64,
+    ) -> Result<Option<SLAConfigSnapshot>, SLAError> {
         Self::check_version(&env)?;
         let registry: Map<u64, SLAConfigSnapshot> = env
             .storage()

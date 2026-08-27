@@ -27,7 +27,7 @@ pub fn get_history(env: &Env) -> Result<Vec<SLAResult>, SLAError> {
         .get(&HISTORY_KEY)
         .unwrap_or_else(|| Vec::new(env));
     let len = history.len();
-    let start = len.saturating_sub(MAX_PAGE_SIZE as u32);
+    let start = len.saturating_sub(MAX_PAGE_SIZE);
     let mut bounded = Vec::new(env);
     for i in start..len {
         bounded.push_back(history.get(i).unwrap());
