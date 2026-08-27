@@ -90,6 +90,10 @@ use crate::config_bundle::ConfigBundle;
 /// Admin address — set during initialize, governs config and roles.
 pub(crate) const ADMIN_KEY: Symbol = symbol_short!("ADMIN");
 
+/// Marker set by `renounce_admin` so that missing admin authority after a
+/// permanent renounce is distinguishable from a never-initialized contract.
+pub(crate) const ADMIN_RENOUNCED_KEY: Symbol = symbol_short!("ADMINRN");
+
 /// Operator address — authorized to call calculate_sla. (#28)
 pub(crate) const OPERATOR_KEY: Symbol = symbol_short!("OPERATOR");
 
@@ -104,6 +108,10 @@ pub(crate) const CONFIG_KEY: Symbol = symbol_short!("CONFIG");
 /// Map of severity -> SLAConfig for admin-defined custom severity levels,
 /// distinct from the four canonical entries (critical/high/medium/low). (#93)
 pub(crate) const CUSTOM_CONFIG_KEY: Symbol = symbol_short!("CUSTCFG");
+
+/// Registry of `config_version_hash -> SLAConfigSnapshot`, recorded on every
+/// config write so historical configs can be recovered for replay. (#408)
+pub(crate) const CONFIG_REGISTRY_KEY: Symbol = symbol_short!("CFGREG");
 
 /// Boolean flag: true when contract is paused. (#27)
 pub(crate) const PAUSED_KEY: Symbol = symbol_short!("PAUSED");
@@ -488,6 +496,8 @@ pub enum SLAError {
     SeverityNotInSet = 18,
     /// Outage already occupies MAX_RECALCS_PER_OUTAGE retained history entries.
     OutageRecalcLimit = 19,
+    /// Admin authority was permanently renounced — admin-gated calls are no longer possible. (#406)
+    AdminRenounced = 20,
 }
 
 // -----------------------------------------------------------------------
@@ -1493,6 +1503,10 @@ impl SLACalculatorContract {
         // always reflects a successful update.
         config_metadata::record_config_update(&env);
 
+        // #408 – record the config snapshot under its new version hash so
+        // historical configs remain recoverable for deterministic replay.
+        Self::record_config_registry(&env)?;
+
         env.events().publish(
             (EVENT_CONFIG_UPD, EVENT_VERSION, severity),
             (threshold_minutes, penalty_per_minute, reward_base),
@@ -1550,6 +1564,9 @@ impl SLACalculatorContract {
             },
         );
         env.storage().instance().set(&CUSTOM_CONFIG_KEY, &custom);
+
+        // #408 – record the config snapshot under its new version hash.
+        Self::record_config_registry(&env)?;
 
         env.events().publish(
             (EVENT_CONFIG_UPD, EVENT_VERSION, severity),
@@ -1663,8 +1680,47 @@ impl SLACalculatorContract {
         })
     }
 
-    /// Returns a deterministic config version hash so backend sync logic can
-    /// detect meaningful config changes cheaply.
+    /// Returns the config snapshot recorded for a given version hash, if any. (#408)
+    pub fn get_config_snapshot_by_version(env: Env, hash: u64) -> Result<Option<SLAConfigSnapshot>, SLAError> {
+        Self::check_version(&env)?;
+        let registry: Map<u64, SLAConfigSnapshot> = env
+            .storage()
+            .instance()
+            .get(&CONFIG_REGISTRY_KEY)
+            .unwrap_or_else(|| Map::new(&env));
+        Ok(registry.get(hash))
+    }
+
+    /// Records the current config snapshot under the current version hash so
+    /// historical configs remain recoverable for deterministic replay. (#408)
+    fn record_config_registry(env: &Env) -> Result<(), SLAError> {
+        let hash = Self::compute_config_version_hash(env)?;
+        let snapshot = Self::build_config_snapshot(env)?;
+        let mut registry: Map<u64, SLAConfigSnapshot> = env
+            .storage()
+            .instance()
+            .get(&CONFIG_REGISTRY_KEY)
+            .unwrap_or_else(|| Map::new(env));
+        registry.set(hash, snapshot);
+        env.storage().instance().set(&CONFIG_REGISTRY_KEY, &registry);
+        Ok(())
+    }
+
+    /// Builds the canonical config snapshot (canonical severities only). (#408)
+    fn build_config_snapshot(env: &Env) -> Result<SLAConfigSnapshot, SLAError> {
+        let mut entries = Vec::new(env);
+        for severity in Self::canonical_severities(env) {
+            let config = Self::load_config(env, &severity)?;
+            entries.push_back(SLAConfigEntry { severity, config });
+        }
+        Ok(SLAConfigSnapshot {
+            version: symbol_short!("v1"),
+            entries,
+        })
+    }
+
+    /// Returns a deterministic config version hash for cheap config-change
+    /// detection by backend sync logic.
     ///
     /// The hash uses a polynomial rolling hash with a prime base and modulus
     /// to provide strong collision resistance while remaining deterministic.
@@ -1692,7 +1748,7 @@ impl SLACalculatorContract {
 
         // Emit in numeric order for deterministic consumption
         // All descriptions must be <= 32 bytes (Soroban Symbol constraint)
-        let entries: [(u32, &str, &str); 19] = [
+        let entries: [(u32, &str, &str); 20] = [
             (1, "AlreadyInitialized", "Contract already initialized"),
             (2, "NotInitialized", "Contract not yet initialized"),
             (3, "Unauthorized", "Caller lacks required role"),
@@ -1712,6 +1768,7 @@ impl SLACalculatorContract {
             (17, "InvalidInput", "Invalid input parameter"),
             (18, "SeverityNotInSet", "Custom severity not registered"),
             (19, "OutageRecalcLimit", "Outage recalc limit reached"),
+            (20, "AdminRenounced", "Admin authority renounced"),
         ];
 
         for (code, label, description) in entries {
@@ -2426,6 +2483,10 @@ impl SLACalculatorContract {
 
     pub(crate) fn require_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
         caller.require_auth();
+        // #406 – distinguish a permanent admin renounce from a fresh contract.
+        if env.storage().instance().has(&ADMIN_RENOUNCED_KEY) {
+            return Err(SLAError::AdminRenounced);
+        }
         let admin: Address = env
             .storage()
             .instance()

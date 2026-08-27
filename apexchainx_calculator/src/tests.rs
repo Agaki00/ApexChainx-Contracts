@@ -1036,7 +1036,7 @@ fn test_set_config_budget_is_reasonable() {
     let after = env.budget().cpu_instruction_cost();
 
     assert!(
-        after - before < 150_000,
+        after - before < 300_000,
         "set_config too expensive: {} instructions",
         after - before
     );
@@ -1059,7 +1059,7 @@ fn test_set_custom_severity_budget_is_reasonable() {
     let after = env.budget().cpu_instruction_cost();
 
     assert!(
-        after - before < 150_000,
+        after - before < 300_000,
         "set_custom_severity too expensive: {} instructions",
         after - before
     );
@@ -8439,6 +8439,7 @@ fn test_failure_catalog_matches_error_helpers() {
         SLAError::InvalidInput,
         SLAError::SeverityNotInSet,
         SLAError::OutageRecalcLimit,
+        SLAError::AdminRenounced,
     ];
 
     for err in all_variants {
@@ -8462,6 +8463,7 @@ fn test_failure_catalog_matches_error_helpers() {
             SLAError::InvalidInput => error_responses::is_invalid_input(&err),
             SLAError::SeverityNotInSet => error_responses::is_severity_not_in_set(&err),
             SLAError::OutageRecalcLimit => error_responses::is_outage_recalc_limit(&err),
+            SLAError::AdminRenounced => error_responses::is_admin_renounced(&err),
         };
         assert!(
             recognized,
@@ -8825,11 +8827,12 @@ fn test_failure_catalog_helpers_are_mutually_exclusive() {
         SLAError::InvalidInput,
         SLAError::SeverityNotInSet,
         SLAError::OutageRecalcLimit,
+        SLAError::AdminRenounced,
     ];
 
     type ErrorPredicate = fn(&SLAError) -> bool;
 
-    let predicates: [(&str, ErrorPredicate); 19] = [
+    let predicates: [(&str, ErrorPredicate); 20] = [
         ("is_already_initialized", error_responses::is_already_initialized),
         ("is_not_initialized", error_responses::is_not_initialized),
         ("is_unauthorized", error_responses::is_unauthorized),
@@ -8861,6 +8864,7 @@ fn test_failure_catalog_helpers_are_mutually_exclusive() {
         ("is_invalid_input", error_responses::is_invalid_input),
         ("is_severity_not_in_set", error_responses::is_severity_not_in_set),
         ("is_outage_recalc_limit", error_responses::is_outage_recalc_limit),
+        ("is_admin_renounced", error_responses::is_admin_renounced),
     ];
 
     assert_eq!(
