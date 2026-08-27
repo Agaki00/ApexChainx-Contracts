@@ -101,6 +101,11 @@ pub fn is_outage_recalc_limit(err: &SLAError) -> bool {
     matches!(err, SLAError::OutageRecalcLimit)
 }
 
+/// Returns `true` if the error is `ProposalExpired`.
+pub fn is_proposal_expired(err: &SLAError) -> bool {
+    matches!(err, SLAError::ProposalExpired)
+}
+
 /// Returns `true` if the error is `AdminRenounced`. (#406)
 pub fn is_admin_renounced(err: &SLAError) -> bool {
     matches!(err, SLAError::AdminRenounced)

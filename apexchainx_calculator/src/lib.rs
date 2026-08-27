@@ -102,6 +102,10 @@ pub(crate) const OPERATOR_KEY: Symbol = symbol_short!("OPERATOR");
 pub(crate) const PENDING_ADMIN_KEY: Symbol = symbol_short!("PADMIN");
 /// Pending operator for two-step handoff. (#64)
 pub(crate) const PENDING_OP_KEY: Symbol = symbol_short!("POP");
+/// Ledger timestamp when the pending admin proposal was made. (#405)
+pub(crate) const PENDING_ADMIN_TS_KEY: Symbol = symbol_short!("PADMINTS");
+/// Ledger timestamp when the pending operator proposal was made. (#405)
+pub(crate) const PENDING_OP_TS_KEY: Symbol = symbol_short!("POPTS");
 
 /// Map of severity -> SLAConfig for all configured severity levels.
 pub(crate) const CONFIG_KEY: Symbol = symbol_short!("CONFIG");
@@ -301,6 +305,12 @@ pub(crate) const EVENT_SETTLE_INTENT: Symbol = symbol_short!("set_int");
 /// reward_base) — the full config triple. Appending fields is safe; reordering
 /// or removing fields requires a version bump.
 pub(crate) const EVENT_CONFIG_UPD: Symbol = symbol_short!("cfg_upd");
+
+/// Emitted when a custom severity is removed via remove_custom_severity.
+///
+/// Compatibility decision: payload is intentionally empty `()`, mirroring
+/// other removal-style events. The removed severity is carried in topic[2].
+pub(crate) const EVENT_CONFIG_REM: Symbol = symbol_short!("cfg_rem");
 
 /// Emitted when the contract is paused by admin. (#27)
 ///
@@ -508,8 +518,10 @@ pub enum SLAError {
     SeverityNotInSet = 18,
     /// Outage already occupies MAX_RECALCS_PER_OUTAGE retained history entries.
     OutageRecalcLimit = 19,
+    /// Pending admin/operator proposal has exceeded its expiry window.
+    ProposalExpired = 20,
     /// Admin authority was permanently renounced — admin-gated calls are no longer possible. (#406)
-    AdminRenounced = 20,
+    AdminRenounced = 21,
 }
 
 // -----------------------------------------------------------------------
@@ -1577,6 +1589,7 @@ impl SLACalculatorContract {
         );
         env.storage().instance().set(&CUSTOM_CONFIG_KEY, &custom);
 
+        config_metadata::record_config_update(&env);
         // #408 – record the config snapshot under its new version hash.
         Self::record_config_registry(&env)?;
 
@@ -1608,7 +1621,7 @@ impl SLACalculatorContract {
         env.storage().instance().set(&CUSTOM_CONFIG_KEY, &custom);
 
         env.events()
-            .publish((EVENT_CONFIG_UPD, EVENT_VERSION, severity), (0u32, 0i128, 0i128));
+            .publish((EVENT_CONFIG_REM, EVENT_VERSION, severity), ());
         Ok(())
     }
 
@@ -1763,7 +1776,7 @@ impl SLACalculatorContract {
 
         // Emit in numeric order for deterministic consumption
         // All descriptions must be <= 32 bytes (Soroban Symbol constraint)
-        let entries: [(u32, &str, &str); 20] = [
+        let entries: [(u32, &str, &str); 21] = [
             (1, "AlreadyInitialized", "Contract already initialized"),
             (2, "NotInitialized", "Contract not yet initialized"),
             (3, "Unauthorized", "Caller lacks required role"),
@@ -1783,7 +1796,8 @@ impl SLACalculatorContract {
             (17, "InvalidInput", "Invalid input parameter"),
             (18, "SeverityNotInSet", "Custom severity not registered"),
             (19, "OutageRecalcLimit", "Outage recalc limit reached"),
-            (20, "AdminRenounced", "Admin authority renounced"),
+            (20, "ProposalExpired", "Proposal expired"),
+            (21, "AdminRenounced", "Admin authority renounced"),
         ];
 
         for (code, label, description) in entries {
@@ -3264,6 +3278,7 @@ impl SLACalculatorContract {
     pub fn set_retention_limit(env: Env, caller: Address, limit: u32) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
+        Self::require_not_frozen(&env)?;
         if limit == 0 || limit > MAX_HISTORY_SIZE {
             return Err(SLAError::RetentionLimitOutOfRange);
         }
