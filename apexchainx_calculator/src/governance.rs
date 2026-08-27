@@ -126,6 +126,7 @@ pub fn renounce_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::config_freeze::require_not_frozen(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
+    env.storage().instance().set(&crate::ADMIN_RENOUNCED_KEY, &true);
     env.storage().instance().remove(&ADMIN_KEY);
     env.storage().instance().remove(&PENDING_ADMIN_KEY);
     env.events()

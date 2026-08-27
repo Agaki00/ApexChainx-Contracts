@@ -29,7 +29,7 @@ use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 use crate::{
     SLAConfig, SLAError, SLAResult, SLAStats, SeverityTelemetry, EVENT_DUP_INPUT, EVENT_SETTLE_INTENT,
-    EVENT_SLA_CALC, EVENT_VERSION, HISTORY_KEY, LAST_CALCULATION_LEDGER_KEY, LAST_VIOLATION_LEDGER_KEY,
+    EVENT_SLA_CALC, EVENT_VERSION, HISTORY_KEY, LAST_CALCULATION_TS_KEY, LAST_VIOLATION_TS_KEY,
     MAX_HISTORY_SIZE, MAX_RECALCS_PER_OUTAGE, PAUSED_KEY, RETENTION_LIMIT_KEY, SEVERITY_CALC_COUNTS_KEY,
     SEVERITY_VIOL_COUNTS_KEY, STATS_KEY,
 };
@@ -318,8 +318,8 @@ pub fn record_severity_telemetry(env: &Env, severity: &Symbol, met: bool) {
     let index = crate::SLACalculatorContract::canonical_severity_index(severity).unwrap_or(0);
     let mut calculations = load_counts(env, &SEVERITY_CALC_COUNTS_KEY);
     let mut violations = load_counts(env, &SEVERITY_VIOL_COUNTS_KEY);
-    let mut last_calculations = load_counts(env, &LAST_CALCULATION_LEDGER_KEY);
-    let mut last_violations = load_counts(env, &LAST_VIOLATION_LEDGER_KEY);
+    let mut last_calculations = load_counts(env, &LAST_CALCULATION_TS_KEY);
+    let mut last_violations = load_counts(env, &LAST_VIOLATION_TS_KEY);
 
     let now = env.ledger().timestamp();
     let week_seconds = 7u64 * 24u64 * 60u64 * 60u64;
@@ -341,14 +341,14 @@ pub fn record_severity_telemetry(env: &Env, severity: &Symbol, met: bool) {
         violations = set_count_lane(violations, index, count_lane(violations, index).saturating_add(1));
     }
 
-    let current_ledger = if now > u64::from(u32::MAX) {
+    let current_ts = if now > u64::from(u32::MAX) {
         u32::MAX
     } else {
         now as u32
     };
-    last_calculations = set_count_lane(last_calculations, index, current_ledger);
+    last_calculations = set_count_lane(last_calculations, index, current_ts);
     if !met {
-        last_violations = set_count_lane(last_violations, index, current_ledger);
+        last_violations = set_count_lane(last_violations, index, current_ts);
     }
 
     env.storage()
@@ -359,10 +359,10 @@ pub fn record_severity_telemetry(env: &Env, severity: &Symbol, met: bool) {
         .set(&SEVERITY_VIOL_COUNTS_KEY, &violations);
     env.storage()
         .instance()
-        .set(&LAST_CALCULATION_LEDGER_KEY, &last_calculations);
+        .set(&LAST_CALCULATION_TS_KEY, &last_calculations);
     env.storage()
         .instance()
-        .set(&LAST_VIOLATION_LEDGER_KEY, &last_violations);
+        .set(&LAST_VIOLATION_TS_KEY, &last_violations);
 }
 
 /// Increments the cumulative SLA statistics, emitting `stats_sat` on overflow.

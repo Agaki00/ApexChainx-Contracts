@@ -17,13 +17,28 @@ use crate::{
 const MAX_PAGE_SIZE: u32 = 200;
 
 /// Returns the full SLA calculation history.
+/// Default page size used to bound legacy full-history reads. (#409)
+pub const MAX_PAGE_SIZE: u32 = 200;
+
+/// Returns a bounded slice of the SLA history (the most recent entries).
+///
+/// LEGACY / EXPENSIVE: this returns at most [`MAX_PAGE_SIZE`] entries and is
+/// retained for backwards compatibility. New consumers should prefer the
+/// paginated [`get_history_page_with_meta`] accessor to bound reads explicitly.
 pub fn get_history(env: &Env) -> Result<Vec<SLAResult>, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
-    Ok(env
+    let history: Vec<SLAResult> = env
         .storage()
         .instance()
         .get(&HISTORY_KEY)
-        .unwrap_or_else(|| Vec::new(env)))
+        .unwrap_or_else(|| Vec::new(env));
+    let len = history.len();
+    let start = len.saturating_sub(MAX_PAGE_SIZE);
+    let mut bounded = Vec::new(env);
+    for i in start..len {
+        bounded.push_back(history.get(i).unwrap());
+    }
+    Ok(bounded)
 }
 
 /// Prunes history to retain only the most recent `keep_latest` entries.
