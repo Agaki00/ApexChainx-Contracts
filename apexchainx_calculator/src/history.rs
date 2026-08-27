@@ -235,10 +235,8 @@ pub fn set_retention_limit(env: &Env, caller: &Address, limit: u32) -> Result<()
         return Err(SLAError::RetentionLimitOutOfRange);
     }
     env.storage().instance().set(&RETENTION_LIMIT_KEY, &limit);
-    env.events().publish(
-        (EVENT_RET_LIM, EVENT_VERSION, caller.clone()),
-        (limit,),
-    );
+    env.events()
+        .publish((EVENT_RET_LIM, EVENT_VERSION, caller.clone()), (limit,));
     Ok(())
 }
 

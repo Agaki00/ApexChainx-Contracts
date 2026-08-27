@@ -2971,8 +2971,10 @@ impl SLACalculatorContract {
             }
 
             env.storage().instance().set(&HISTORY_KEY, &new_history);
-            env.events()
-                .publish((EVENT_PRUNED, EVENT_VERSION, caller), (remove_count, new_history.len()));
+            env.events().publish(
+                (EVENT_PRUNED, EVENT_VERSION, caller),
+                (remove_count, new_history.len()),
+            );
         }
 
         Ok(())
