@@ -18,7 +18,7 @@
 //! - topic[2]: severity Symbol
 //! - payload:  (outage_id: Symbol, status: Symbol, payment_type: Symbol,
 //!   rating: Symbol, mttr_minutes: u32, threshold_minutes: u32,
-//!   amount: i128)
+//!   amount: i128, config_version_hash: u64, recorded_at: u64)
 //!
 //! ## set_int (`set_int`)
 //! Settlement intent emitted alongside sla_calc for backend reconciliation.

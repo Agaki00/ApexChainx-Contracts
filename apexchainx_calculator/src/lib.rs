@@ -228,7 +228,7 @@ pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
 //
 // sla_calc  → (outage_id: Symbol, status: Symbol, payment_type: Symbol,
 //              rating: Symbol, mttr_minutes: u32, threshold_minutes: u32,
-//              amount: i128)
+//              amount: i128, config_version_hash: u64, recorded_at: u64)
 //   context: severity Symbol
 //
 // cfg_upd   → (threshold_minutes: u32, penalty_per_minute: i128,
@@ -512,7 +512,7 @@ pub enum SLAError {
     InvalidRewardAmount = 15,
     /// Configuration is frozen — config changes are blocked.
     ConfigFrozen = 16,
-    /// Input parameter violates documented constraints (e.g., reason too long). (#68)
+    /// Input parameter violates documented constraints (e.g., reason too long, mttr_minutes exceeds maximum). (#68)
     InvalidInput = 17,
     /// Custom severity referenced but not registered. (#93)
     SeverityNotInSet = 18,
@@ -584,8 +584,9 @@ pub struct SLAResult {
 ///
 /// The `items` slice is identical to what `get_history_page` returns for the
 /// same `(offset, limit)`; `total` is the full history length and `has_more`
-/// is `true` when the requested range ends before the end of history (i.e.
-/// more entries can be fetched by advancing `offset`).
+/// is `true` when the requested range ends before the end of history **and**
+/// `limit > 0`. When `limit == 0`, `has_more` is `false` (empty page signals
+/// end-of-history).
 #[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -595,7 +596,8 @@ pub struct HistoryPage {
     /// Total number of history entries currently stored.
     pub total: u32,
     /// Whether the requested range ends before the end of history (more
-    /// entries can be fetched by advancing `offset`).
+    /// entries can be fetched by advancing `offset`). When `limit == 0`,
+    /// this is `false` (empty page signals end-of-history).
     pub has_more: bool,
 }
 
@@ -2213,6 +2215,10 @@ impl SLACalculatorContract {
 
     /// Recalculates SLA deterministically without mutating any state or emitting events.
     /// Can be called by anyone for verification and audit purposes.
+    ///
+    /// # Input constraints
+    ///
+    /// - `mttr_minutes` must be ≤ 525,600 (365 days). Values exceeding this bound are rejected with `InvalidInput`.
     pub fn calculate_sla_view(
         env: Env,
         outage_id: Symbol,
@@ -2303,9 +2309,14 @@ impl SLACalculatorContract {
     /// | `Unauthorized` | Caller is not the operator |
     /// | `ConfigNotFound` | No configuration exists for the requested severity |
     /// | `DuplicateOutageInput` | Same `outage_id` submitted with conflicting inputs; emits a `dup_input` event carrying the stored result |
+    /// | `InvalidInput` | Input parameter violates documented constraints (e.g., mttr_minutes exceeds maximum allowed) |
     /// | `InvalidPenaltyAmount` | Penalty computation overflowed or produced a non-negative value |
     /// | `InvalidRewardAmount` | Reward computation overflowed or produced a non-positive value |
     /// Records an SLA decision for `outage_id`. Operator only.
+    ///
+    /// # Input constraints
+    ///
+    /// - `mttr_minutes` must be ≤ 525,600 (365 days). Values exceeding this bound are rejected with `InvalidInput`.
     ///
     /// # Repeated submissions for the same outage_id
     ///
@@ -3163,7 +3174,8 @@ impl SLACalculatorContract {
     /// `items` slice is identical to what `get_history_page` returns for the
     /// same `(offset, limit)`; `total` is the full history length and
     /// `has_more` is `true` when the requested range ends before the end of
-    /// history.
+    /// history **and** `limit > 0`. When `limit == 0`, `has_more` is `false` to
+    /// signal end-of-history (empty page).
     ///
     /// Pagination semantics (offset-based, oldest-first, saturating
     /// `offset + limit`, empty page when `offset >= len` or `limit == 0`) are
@@ -3182,17 +3194,20 @@ impl SLACalculatorContract {
         // Saturating arithmetic mirrors `get_history_page`: clamp the end index
         // to the real history length so extreme `u32` inputs can never wrap into
         // a wrong slice. `end` also drives `has_more`: entries remain whenever
-        // the requested range stops short of the end of history.
+        // the requested range stops short of the end of history and limit > 0.
         let end = offset.saturating_add(limit).min(total);
         if offset < total && limit != 0 {
             for i in offset..end {
                 items.push_back(history.get(i).unwrap());
             }
         }
+        // When limit == 0, the page is empty by request, which signals end-of-history
+        // per the pagination policy. This ensures consistency with get_history_page.
+        let has_more = if limit == 0 { false } else { end < total };
         Ok(HistoryPage {
             items,
             total,
-            has_more: end < total,
+            has_more,
         })
     }
 
