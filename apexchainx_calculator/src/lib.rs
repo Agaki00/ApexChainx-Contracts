@@ -177,6 +177,19 @@ pub(crate) const RESULT_SCHEMA_VERSION: u32 = 1;
 /// 6. See `docs/result-schema-migration-guard.md` for the full process.
 pub(crate) const RESULT_SCHEMA_FIELD_COUNT: u32 = 9;
 
+/// Version label of the SLAConfigSnapshot schema exposed via get_config_snapshot().
+/// Incremented/bumped when snapshot layout changes in a breaking way.
+pub(crate) const CONFIG_SNAPSHOT_SCHEMA_VERSION: Symbol = symbol_short!("v1");
+
+/// Number of named fields in `SLAConfigSnapshot`.
+///
+/// This constant is the migration guardrail for `SLAConfigSnapshot`.
+/// It must be updated in the same commit that adds or removes a field from
+/// `SLAConfigSnapshot`. The companion test `test_config_snapshot_schema_field_count_sentinel`
+/// in `schema_migration_tests.rs` will fail CI if the struct layout changes
+/// without a corresponding update to this constant and `CONFIG_SNAPSHOT_SCHEMA_VERSION`.
+pub(crate) const CONFIG_SNAPSHOT_SCHEMA_FIELD_COUNT: u32 = 2;
+
 /// Hard upper bound on retained history entries. (SC-062)
 /// Configurable down to 1 via set_retention_limit().
 pub(crate) const MAX_HISTORY_SIZE: u32 = 1000;
@@ -1061,6 +1074,11 @@ impl SLACalculatorContract {
     /// Deploy the contract.
     /// `admin`    – may update config, pause/unpause, and assign the operator.
     /// `operator` – may call `calculate_sla`.
+    ///
+    /// # Role Distinctness & Single-Address Mode
+    /// Both `admin` and `operator` signatures are required at initialization. However, `admin` and
+    /// `operator` may be set to the same address for single-key / merged-role deployments where
+    /// role separation is not required. In this case, both authorization checks are satisfied by a single signature.
     pub fn initialize(env: Env, admin: Address, operator: Address) -> Result<(), SLAError> {
         if env.storage().instance().has(&ADMIN_KEY) {
             return Err(SLAError::AlreadyInitialized);
@@ -1656,7 +1674,7 @@ impl SLACalculatorContract {
         }
 
         Ok(SLAConfigSnapshot {
-            version: symbol_short!("v1"),
+            version: CONFIG_SNAPSHOT_SCHEMA_VERSION,
             entries,
         })
     }
@@ -1700,7 +1718,7 @@ impl SLACalculatorContract {
         }
 
         Ok(SLAConfigSnapshot {
-            version: symbol_short!("v1"),
+            version: CONFIG_SNAPSHOT_SCHEMA_VERSION,
             entries,
         })
     }
@@ -1742,7 +1760,7 @@ impl SLACalculatorContract {
             entries.push_back(SLAConfigEntry { severity, config });
         }
         Ok(SLAConfigSnapshot {
-            version: symbol_short!("v1"),
+            version: CONFIG_SNAPSHOT_SCHEMA_VERSION,
             entries,
         })
     }
@@ -1850,8 +1868,13 @@ impl SLACalculatorContract {
     /// contract is initialised and on the current storage version.
     pub fn get_config_bundle(env: Env) -> Result<Option<ConfigBundle>, SLAError> {
         let snapshot = Self::get_config_snapshot(env.clone())?;
-        let schema = Self::get_result_schema(env)?;
-        Ok(Some(ConfigBundle { snapshot, schema }))
+        let schema = Self::get_result_schema(env.clone())?;
+        let config_version_hash = Self::compute_config_version_hash(&env)?;
+        Ok(Some(ConfigBundle {
+            snapshot,
+            schema,
+            config_version_hash,
+        }))
     }
 
     /// Returns the full audit state including roles, config, stats, and history.
@@ -2224,11 +2247,29 @@ impl SLACalculatorContract {
         let cfg = Self::load_config(&env, &severity)?;
         let config_version_hash = Self::compute_config_version_hash(&env)?;
 
-        // Delegate to pure internal math without mutating state or emitting events.
+        // Apply duplicate/replay policy read-only against recorded history
+        let history: Vec<SLAResult> = env
+            .storage()
+            .instance()
+            .get(&HISTORY_KEY)
+            .unwrap_or_else(|| Vec::new(&env));
 
-        // Use the current ledger timestamp so the view result matches the mutating
-        // path for the same inputs executed in the same ledger, while still avoiding
-        // any state writes or event emission.
+        let mut existing: Option<SLAResult> = None;
+        for i in 0..history.len() {
+            let entry = history.get(i).unwrap();
+            if entry.outage_id == outage_id {
+                existing = Some(entry);
+            }
+        }
+        if let Some(prev) = existing {
+            if prev.config_version_hash == config_version_hash {
+                if prev.mttr_minutes != mttr_minutes || prev.threshold_minutes != cfg.threshold_minutes {
+                    return Err(SLAError::DuplicateOutageInput);
+                }
+                return Ok(prev);
+            }
+        }
+
         Self::compute_result(
             outage_id,
             mttr_minutes,

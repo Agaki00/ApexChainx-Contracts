@@ -158,6 +158,29 @@ pub fn calculate_sla_view(
     crate::SLACalculatorContract::check_version(env)?;
     let cfg = crate::SLACalculatorContract::load_config(env, &severity)?;
     let config_version_hash = crate::SLACalculatorContract::compute_config_version_hash(env)?;
+
+    let history: Vec<SLAResult> = env
+        .storage()
+        .instance()
+        .get(&HISTORY_KEY)
+        .unwrap_or_else(|| Vec::new(env));
+
+    let mut existing: Option<SLAResult> = None;
+    for i in 0..history.len() {
+        let entry = history.get(i).unwrap();
+        if entry.outage_id == outage_id {
+            existing = Some(entry);
+        }
+    }
+    if let Some(prev) = existing {
+        if prev.config_version_hash == config_version_hash {
+            if prev.mttr_minutes != mttr_minutes || prev.threshold_minutes != cfg.threshold_minutes {
+                return Err(SLAError::DuplicateOutageInput);
+            }
+            return Ok(prev);
+        }
+    }
+
     compute_result(
         outage_id,
         mttr_minutes,

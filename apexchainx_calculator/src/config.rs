@@ -8,7 +8,7 @@ use soroban_sdk::{symbol_short, Env, Map, Symbol, Vec};
 
 use crate::{
     config_freeze, config_metadata, SLAConfig, SLAConfigEntry, SLAConfigSnapshot, SLAError, CONFIG_KEY,
-    CUSTOM_CONFIG_KEY, EVENT_CONFIG_UPD, EVENT_VERSION,
+    CONFIG_SNAPSHOT_SCHEMA_VERSION, CUSTOM_CONFIG_KEY, EVENT_CONFIG_UPD, EVENT_VERSION,
 };
 
 /// Sets the SLA configuration for a given severity level.
@@ -75,7 +75,7 @@ pub fn get_config_snapshot(env: &Env) -> Result<SLAConfigSnapshot, SLAError> {
     }
 
     Ok(SLAConfigSnapshot {
-        version: symbol_short!("v1"),
+        version: CONFIG_SNAPSHOT_SCHEMA_VERSION,
         entries,
     })
 }
@@ -201,7 +201,7 @@ pub fn get_custom_config_snapshot(env: &Env) -> Result<SLAConfigSnapshot, SLAErr
     }
 
     Ok(SLAConfigSnapshot {
-        version: symbol_short!("v1"),
+        version: CONFIG_SNAPSHOT_SCHEMA_VERSION,
         entries,
     })
 }

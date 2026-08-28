@@ -65,6 +65,32 @@ fn test_initialize_stores_roles() {
 }
 
 #[test]
+fn test_initialize_single_address_merged_roles() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let single_key = soroban_sdk::Address::generate(&env);
+
+    client.initialize(&single_key, &single_key);
+
+    assert_eq!(client.get_admin(), single_key);
+    assert_eq!(client.get_operator(), single_key);
+
+    // Single key can invoke both admin and operator methods
+    let result = client.calculate_sla(
+        &single_key,
+        &symbol_short!("INC001"),
+        &symbol_short!("critical"),
+        &10,
+    );
+    assert_eq!(result.status, symbol_short!("met"));
+
+    client.set_config(&single_key, &symbol_short!("critical"), &20, &200, &1000);
+    assert_eq!(client.get_config(&symbol_short!("critical")).threshold_minutes, 20);
+}
+
+#[test]
 #[should_panic]
 fn test_double_initialize_fails() {
     let (_env, client, actors) = setup();
@@ -5211,6 +5237,46 @@ fn test_invariance_critical_all_rating_zones() {
 }
 
 #[test]
+fn test_calculate_sla_view_detects_duplicate_conflict() {
+    let (_env, client, actors) = setup();
+    let outage_id = symbol_short!("OUTDUP1");
+    let severity = symbol_short!("critical");
+
+    // First, record a calculation via mutating path
+    let res1 = client.calculate_sla(&actors.operator, &outage_id, &severity, &10);
+    assert_eq!(res1.status, symbol_short!("met"));
+
+    // View call with conflicting mttr must return DuplicateOutageInput error
+    let res2 = client.try_calculate_sla_view(&outage_id, &severity, &20);
+    assert_eq!(res2, Err(Ok(SLAError::DuplicateOutageInput)));
+}
+
+#[test]
+fn test_calculate_sla_view_handles_replay() {
+    let (env, client, actors) = setup();
+    env.ledger().set_timestamp(1000);
+    let outage_id = symbol_short!("OUTREP1");
+    let severity = symbol_short!("critical");
+
+    // Record calculation at t = 1000
+    let orig = client.calculate_sla(&actors.operator, &outage_id, &severity, &10);
+    assert_eq!(orig.recorded_at, 1000);
+
+    // Advance time to t = 2000
+    env.ledger().set_timestamp(2000);
+
+    // View call for identical outage_id and mttr must replay stored result with original timestamp (1000)
+    let replayed = client.calculate_sla_view(&outage_id, &severity, &10);
+    assert_eq!(replayed.recorded_at, 1000);
+    assert_eq!(replayed.amount, orig.amount);
+    assert_eq!(replayed.status, orig.status);
+
+    // Assert side-effect free: history count remains 1
+    let history = client.get_history_page(&0, &10);
+    assert_eq!(history.entries.len(), 1);
+}
+
+#[test]
 fn test_invariance_high_all_rating_zones() {
     let (_env, client, actors) = setup();
     let sev = symbol_short!("high");
@@ -8086,6 +8152,7 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
             deprecated_symbols,
             severity_aliases,
         },
+        config_version_hash: 12345,
     };
     let scval_bundle: soroban_sdk::Val = config_bundle.clone().try_into_val(&env).unwrap();
     let restored_bundle: ConfigBundle = scval_bundle.try_into_val(&env).unwrap();
