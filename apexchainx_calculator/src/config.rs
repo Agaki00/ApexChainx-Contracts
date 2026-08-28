@@ -64,6 +64,24 @@ pub fn get_config(env: &Env, severity: Symbol) -> Result<SLAConfig, SLAError> {
 }
 
 /// Returns a deterministic backend-friendly snapshot of all canonical config values.
+///
+/// # Canonical Config Endpoint
+///
+/// This is the **canonical endpoint** for reading configuration data. It returns
+/// entries in a guaranteed canonical severity order (critical → high → medium → low)
+/// with typed `SLAConfigEntry` structs, making it suitable for:
+/// - Backend consumers that need stable ordering
+/// - Serialization and diffing logic
+/// - Config bundle generation
+///
+/// # When to Use list_configs Instead
+///
+/// Use `list_configs` only if you need:
+/// - Raw map access for low-level inspection
+/// - Direct iteration over the underlying storage map
+///
+/// Note that `list_configs` does not guarantee any ordering and returns raw
+/// `SLAConfig` values without the typed entry wrapper.
 pub fn get_config_snapshot(env: &Env) -> Result<SLAConfigSnapshot, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
 
@@ -81,6 +99,23 @@ pub fn get_config_snapshot(env: &Env) -> Result<SLAConfigSnapshot, SLAError> {
 }
 
 /// Returns the full map of severity-to-config entries.
+///
+/// # Raw/Low-Level Config Endpoint
+///
+/// This is a **raw endpoint** that returns the underlying storage map directly.
+/// It is provided for low-level inspection and debugging purposes.
+///
+/// **Important caveats:**
+/// - Does **not** guarantee any ordering (map-internal ordering is SDK-dependent)
+/// - Returns raw `SLAConfig` values without the typed entry wrapper
+/// - Not suitable for consumers that need stable ordering across SDK versions
+///
+/// # Canonical Endpoint
+///
+/// For most use cases, use `get_config_snapshot` instead, which:
+/// - Guarantees canonical severity order (critical → high → medium → low)
+/// - Returns typed `SLAConfigEntry` structs with severity labels
+/// - Is stable across SDK versions
 pub fn list_configs(env: &Env) -> Result<Map<Symbol, SLAConfig>, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     env.storage()

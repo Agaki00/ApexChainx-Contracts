@@ -311,4 +311,43 @@ mod topic_stability_tests {
         }
         panic!("set_int event not found");
     }
+
+    // ── All events must have exactly 3 topics ─────────────────────────
+
+    #[test]
+    fn test_all_events_have_exactly_three_topics() {
+        let env = Env::default();
+        let (admin, operator, client) = setup(&env);
+        let new_admin = Address::generate(&env);
+        let new_op = Address::generate(&env);
+
+        // Trigger all event types to ensure comprehensive coverage
+        client.calculate_sla(
+            &operator,
+            &symbol_short!("ALL3"),
+            &symbol_short!("critical"),
+            &5,
+        );
+        client.set_config(&admin, &symbol_short!("critical"), &20, &200, &1000);
+        client.pause(&admin);
+        client.unpause(&admin);
+        client.propose_admin(&admin, &new_admin);
+        client.cancel_admin_proposal(&admin);
+        client.propose_operator(&admin, &new_op);
+        client.cancel_operator_proposal(&admin);
+        client.set_operator(&admin, &new_op);
+        client.freeze_config(&admin);
+        client.unfreeze_config(&admin);
+        client.set_retention_limit(&admin, &50);
+
+        let events = env.events().all();
+        for i in 0..events.len() {
+            let (_, topics, _) = events.get(i).unwrap();
+            assert_eq!(
+                topics.len(), 3,
+                "Every event must have exactly 3 topics (name, version, context), found {} topics",
+                topics.len()
+            );
+        }
+    }
 }
