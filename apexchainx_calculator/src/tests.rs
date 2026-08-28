@@ -305,6 +305,61 @@ fn test_severity_telemetry_weekly_reset_semantics() {
 }
 
 #[test]
+fn test_record_severity_telemetry_decoupled_lane_resets() {
+    let (env, client, actors) = setup();
+
+    // 1. Initial calculation & violation at t = 1,000,000
+    env.ledger().set_timestamp(1_000_000);
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EVT001"),
+        &symbol_short!("high"),
+        &40, // violation (threshold = 30)
+    );
+
+    let t1 = client.get_severity_telemetry();
+    let high1 = t1.get(1).unwrap();
+    assert_eq!(high1.calculations, 1);
+    assert_eq!(high1.violations, 1);
+
+    // 2. Advance time by 4 days to t = 1,345,600 and record a MET calculation.
+    // Last calculation ts becomes 1,345,600. Last violation ts remains 1,000,000.
+    env.ledger().set_timestamp(1_000_000 + 4 * 86_400);
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EVT002"),
+        &symbol_short!("high"),
+        &10, // met
+    );
+
+    let t2 = client.get_severity_telemetry();
+    let high2 = t2.get(1).unwrap();
+    assert_eq!(high2.calculations, 2);
+    assert_eq!(high2.violations, 1);
+
+    // 3. Advance time to t = 1,000,000 + 7.5 days (1,648,000).
+    // Time since last violation = 648,000s >= 604,800s (violation_stale = true).
+    // Time since last calculation = 302,400s < 604,800s (calc_stale = false).
+    env.ledger().set_timestamp(1_000_000 + 7 * 86_400 + 43_200);
+
+    // Record another MET calculation.
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EVT003"),
+        &symbol_short!("high"),
+        &10, // met
+    );
+
+    let t3 = client.get_severity_telemetry();
+    let high3 = t3.get(1).unwrap();
+    // Violation counter reset to 0 then 0 added (since EVT003 was met) = 0 violations.
+    // Calculation counter survived reset! Was 2, incremented by 1 = 3 calculations.
+    assert_eq!(high3.calculations, 3);
+    assert_eq!(high3.violations, 0);
+    assert_eq!(high3.violation_rate, 0);
+}
+
+#[test]
 fn test_severity_telemetry_counters_saturate_at_u32_max() {
     let (env, client, actors) = setup();
     env.ledger().set_timestamp(1000);
@@ -3315,6 +3370,66 @@ fn test_get_latest_by_outage_does_not_return_other_outage() {
     assert!(result.is_none());
 }
 
+#[test]
+fn test_get_history_by_outage_multi_generation_history() {
+    let (env, client, actors) = setup();
+
+    // 1. Initial calculation under generation 1
+    client.calculate_sla(
+        &actors.operator,
+        &symbol(&env, "OUT_MULTI"),
+        &symbol_short!("critical"),
+        &10,
+    );
+
+    let res1 = client.get_history_by_outage(&symbol(&env, "OUT_MULTI"));
+    assert_eq!(res1.len(), 1);
+    let hash1 = res1.get(0).unwrap().config_version_hash;
+
+    // 2. Change configuration (creates new config generation)
+    client.set_config(&actors.admin, &symbol_short!("critical"), &20, &200, &1000);
+
+    // 3. Recalculate under generation 2
+    client.calculate_sla(
+        &actors.operator,
+        &symbol(&env, "OUT_MULTI"),
+        &symbol_short!("critical"),
+        &10,
+    );
+
+    let res2 = client.get_history_by_outage(&symbol(&env, "OUT_MULTI"));
+    assert_eq!(res2.len(), 2);
+    let hash2 = res2.get(1).unwrap().config_version_hash;
+
+    // Verify config_version_hash differs between generations
+    assert_ne!(hash1, hash2);
+
+    // Verify ordering: first entry is generation 1, last entry is generation 2
+    assert_eq!(res2.get(0).unwrap().config_version_hash, hash1);
+    assert_eq!(res2.get(1).unwrap().config_version_hash, hash2);
+
+    // Verify latest accessor matches final entry of get_history_by_outage
+    let latest = client.get_latest_by_outage(&symbol(&env, "OUT_MULTI")).unwrap();
+    assert_eq!(latest.config_version_hash, hash2);
+}
+
+#[test]
+fn test_get_full_audit_state_single_pass_efficiency() {
+    let (_env, client, actors) = setup();
+
+    let state = client.get_full_audit_state();
+    assert_eq!(state.admin, actors.admin);
+    assert_eq!(state.operator, actors.operator);
+    assert_eq!(state.pending_admin, None);
+    assert_eq!(state.pending_operator, None);
+    assert_eq!(state.paused, false);
+    assert_eq!(state.pause_info.len(), 0);
+    assert_eq!(state.config_snapshot.entries.len(), 4);
+    assert_eq!(state.stats.total_calculations, 0);
+    assert_eq!(state.history_len, 0);
+    assert_eq!(state.result_schema.version, symbol_short!("v1"));
+}
+
 // ============================================================
 // SC-062 – Bounded-history retention
 // ============================================================
@@ -3380,7 +3495,7 @@ fn test_prune_by_age_removes_old_entries() {
 fn test_prune_by_age_keeps_all_when_none_old_enough() {
     let env = Env::default();
     env.mock_all_auths();
-    env.ledger().set_timestamp(1000);
+    env.ledger().set_timestamp(3000);
 
     let cid = env.register_contract(None, SLACalculatorContract);
     let client = SLACalculatorContractClient::new(&env, &cid);
@@ -3391,17 +3506,52 @@ fn test_prune_by_age_keeps_all_when_none_old_enough() {
     client.calculate_sla(&op, &symbol_short!("E1"), &symbol_short!("critical"), &5);
     client.calculate_sla(&op, &symbol_short!("E2"), &symbol_short!("high"), &10);
 
-    // Prune with min_age_seconds=2000 → cutoff = 1000 - 2000 saturates to 0
-    // All entries have recorded_at=1000 >= 0 → nothing removed
-    client.prune_history_by_age(&admin, &2000);
+    // Prune with min_age_seconds=500 -> cutoff = 3000 - 500 = 2500
+    // All entries have recorded_at=3000 >= 2500 -> nothing removed
+    client.prune_history_by_age(&admin, &500);
 
     let history = client.get_history();
     assert_eq!(history.len(), 2);
 }
 
 #[test]
+#[should_panic]
+fn test_prune_by_age_rejects_min_age_equal_to_now() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1000);
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    // min_age_seconds == now (1000) -> rejected with InvalidInput
+    client.prune_history_by_age(&admin, &1000);
+}
+
+#[test]
+#[should_panic]
+fn test_prune_by_age_rejects_min_age_greater_than_now() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1000);
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    // min_age_seconds (2000) > now (1000) -> rejected with InvalidInput
+    client.prune_history_by_age(&admin, &2000);
+}
+
+#[test]
 fn test_prune_by_age_empty_history_is_noop() {
-    let (_env, client, actors) = setup();
+    let (env, client, actors) = setup();
+    env.ledger().set_timestamp(1000);
     // No entries – should not panic
     client.prune_history_by_age(&actors.admin, &100);
     assert_eq!(client.get_history().len(), 0);
@@ -3410,7 +3560,8 @@ fn test_prune_by_age_empty_history_is_noop() {
 #[test]
 #[should_panic]
 fn test_prune_by_age_operator_cannot_prune() {
-    let (_env, client, actors) = setup();
+    let (env, client, actors) = setup();
+    env.ledger().set_timestamp(1000);
     client.prune_history_by_age(&actors.operator, &100);
 }
 
