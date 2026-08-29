@@ -201,9 +201,73 @@ jobs:
           restore-keys: |
             fuzz-regression-${{ runner.os }}-cargo-
 
+      # `cargo fuzz run <target>` builds only the named target, so a target
+      # that stops compiling stays invisible on PRs and the nightly campaign in
+      # fuzz.yml swallows the error. `cargo fuzz build` builds all of them, and
+      # this job already has nightly and cargo-fuzz installed, so it is nearly
+      # free here. See docs/FUZZING_GUARANTEES.md.
+      - name: Build all fuzz targets
+        working-directory: apexchainx_calculator/fuzz
+        run: cargo +nightly fuzz build
+
       - name: Run config mutation sequence fuzz target (fixed iterations)
         working-directory: apexchainx_calculator/fuzz
         run: cargo +nightly fuzz run config_mutation_sequences -- -runs=10000 -seed=388
+
+  # Issue: ts/ reimplements contract read semantics in TypeScript. This job is
+  # the mechanism that stops the two drifting: it regenerates the
+  # contract-derived artefacts from live contract behaviour, fails if that
+  # produces an uncommitted diff (a Rust change that never reached TypeScript),
+  # then replays the recorded inputs through the TypeScript helpers.
+  # See docs/TS_PARITY_CONTRACT.md.
+  ts-parity:
+    name: TS Parity (contract-derived fixtures)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ts-parity-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ts-parity-${{ runner.os }}-cargo-
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Regenerate contract-derived artifacts
+        working-directory: apexchainx_calculator
+        run: cargo test --lib ts_parity_fixtures
+
+      - name: Fail if the committed artifacts are stale
+        run: |
+          if ! git diff --quiet -- ts/fixtures ts/generated; then
+            echo "::error::Contract-derived TS artifacts are stale. A read semantic changed in Rust but ts/fixtures and ts/generated were not regenerated and committed. Run 'just ts-fixtures' and commit the result."
+            git --no-pager diff -- ts/fixtures ts/generated
+            exit 1
+          fi
+
+      - name: Type-check the ts/ helpers
+        run: npx tsc --noEmit
+
+      - name: Run the TypeScript parity suite
+        run: npx tsx --test ts/parity/readSemanticsParity.test.ts
 
   release-tests:
     name: Release Tests (#90)

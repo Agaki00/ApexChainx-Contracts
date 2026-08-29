@@ -2,7 +2,7 @@
 
 > **Status:** Active
 > **Reference:** [Issue #263](https://github.com/ApexChainx/ApexChainx-Contracts/issues/263)
-> **Last updated:** 2026-08-20
+> **Last updated:** 2026-08-29
 > **Audience:** Backend consumers, operators, and contract contributors
 
 ## Table of Contents
@@ -44,10 +44,11 @@ Each is implemented in two places that must stay in lockstep:
   (the on-chain method consumers call).
 - `apexchainx_calculator/src/history.rs` — the module-level helper.
 
-Both read the full history vector, compute `end = min(saturating_add(offset, limit), len)`,
-and return the slice `history[offset..end]`. History is capped at
-`MAX_HISTORY_SIZE` (1000) entries and is append-only; entries are never
-reordered, so pagination is stable across calls.
+Both clamp `limit` to `MAX_PAGE_SIZE`, read the full history vector, compute
+`end = min(saturating_add(offset, limit), len)`, and return the slice
+`history[offset..end]`. History is capped at `MAX_HISTORY_SIZE` (1000) entries
+and is append-only; entries are never reordered, so pagination is stable across
+calls.
 
 ## Policy: offset semantics
 
@@ -62,20 +63,29 @@ reordered, so pagination is stable across calls.
 ## Policy: limit & page size
 
 - `limit` is the **maximum number of entries** returned per page.
-- `limit` is **not** clamped to an upper bound. The effective page size is
-  `min(limit, len - offset)`: a `limit` larger than the remaining history
-  returns everything that remains.
-- A page **shorter than the requested `limit`** therefore signals that fewer
-  entries remain than were asked for — the strongest end-of-history signal.
+- `limit` **is clamped** to `MAX_PAGE_SIZE` (**200**, defined in
+  `apexchainx_calculator/src/history.rs`). No single call can read the whole
+  retained history, which bounds read cost server-side. (#409)
+- The effective page size is `min(min(limit, MAX_PAGE_SIZE), len - offset)`: a
+  `limit` larger than the remaining history returns everything that remains,
+  and a `limit` above `MAX_PAGE_SIZE` returns at most `MAX_PAGE_SIZE` entries.
+- A page **shorter than the requested `limit`** therefore signals *either* that
+  fewer entries remain *or* that the limit was clamped. Consumers that pass a
+  `limit` above `MAX_PAGE_SIZE` must not treat a short page as end-of-history
+  on its own — use `has_more` from `get_history_page_with_meta`, or keep the
+  requested `limit` at or below `MAX_PAGE_SIZE`, where a short page is an
+  unambiguous end-of-history signal.
 - `limit == 0` returns an empty page (zero items requested).
 - `limit` is `u32`, so consumers may pass up to `u32::MAX` safely (see
-  [overflow safety](#policy-overflow-safety)).
+  [overflow safety](#policy-overflow-safety)); it is simply clamped.
 
 ## Policy: end-of-history signalling
 
-There are two equivalent end-of-history signals:
+There are two end-of-history signals:
 
-1. A returned page with **fewer than `limit` entries** (when `limit > 0`), or
+1. A returned page with **fewer than `limit` entries**, when
+   `0 < limit <= MAX_PAGE_SIZE`. (A `limit` above `MAX_PAGE_SIZE` always
+   returns a short page once clamped, so this signal does not apply there.)
 2. An **empty page** (which is also the result of `offset >= len` or
    `limit == 0`).
 
@@ -119,6 +129,7 @@ can overflow (e.g. `offset` near `u32::MAX`, or `limit = u32::MAX`). The
 implementation therefore uses **saturating addition**:
 
 ```rust
+let limit = limit.min(MAX_PAGE_SIZE);
 let end = offset.saturating_add(limit).min(len);
 ```
 
@@ -143,3 +154,15 @@ matching helper in `apexchainx_calculator/src/history.rs`) is the canonical
 source of truth for this policy. If this document and the code ever disagree,
 the code wins — update this document to match the code, and add a test in
 `apexchainx_calculator/src/tests.rs` covering the divergent case.
+
+This has happened: the "limit is not clamped" wording above described behaviour
+from before #409 added the `MAX_PAGE_SIZE` clamp, and the TypeScript mirror in
+`ts/historyPagination.ts` had independently settled on a third answer (a cap of
+50). All three now agree, and two mechanisms keep them that way:
+
+- `apexchainx_calculator/src/spec.rs` restates this policy as executable code
+  (`expected_page_end`, `expected_has_more`), asserted against the contract by
+  the `fuzz_spec` unit tests — see `docs/FUZZING_GUARANTEES.md`.
+- `ts/generated/contractConstants.ts` is generated from the contract, so the
+  TypeScript mirror cannot hold a stale `MAX_PAGE_SIZE` — see
+  `docs/TS_PARITY_CONTRACT.md`.
