@@ -12,6 +12,20 @@
 //! * the retention limit stays within `[1, MAX_HISTORY_SIZE]`,
 //! * custom severities never shadow canonical names, and
 //! * history stays bounded and every entry is well-formed.
+//!
+//! # What this target does NOT assert
+//!
+//! The *values* a calculation produces. Whether a given MTTR yields the
+//! documented status, rating and amount is the job of the `compute_result`
+//! target, which checks every outcome against `apexchainx_calculator::spec`;
+//! this one only asserts that whatever was produced is internally consistent
+//! and correctly stored. Authorization, pause and freeze gating, duplicate
+//! detection and event payload shape are also out of scope here.
+//!
+//! # If this target fails
+//!
+//! See `docs/FUZZING_GUARANTEES.md` § "Which statement is authoritative"
+//! before changing either the implementation or the invariants above.
 
 use apexchainx_calculator::{SLACalculatorContract, SLACalculatorContractClient};
 use libfuzzer_sys::fuzz_target;

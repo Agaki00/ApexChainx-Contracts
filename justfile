@@ -106,14 +106,81 @@ test:
     cd {{crate}} && cargo test --lib
 
 # Run the property-based fuzz tests.     [CI: Fuzz Tests (proptest)]
+#
+# NOTE: this is the stable-toolchain proptest layer, not the coverage-guided
+# cargo-fuzz targets in {{crate}}/fuzz/ (those run nightly — see `fuzz-build`
+# and `fuzz-run` below, and docs/FUZZING_GUARANTEES.md for what each layer
+# guarantees).
 fuzz:
     cd {{crate}} && cargo test --lib fuzz_tests::
+
+# Run the spec-assertion unit tests that pin what the cargo-fuzz targets check.
+#
+# The fuzz targets are thin wrappers over apexchainx_calculator::fuzz_spec, so
+# these tests exercise the same invariants on the stable toolchain, on fixed
+# boundary vectors, without needing nightly or cargo-fuzz.
+fuzz-spec:
+    cd {{crate}} && cargo test --lib fuzz_spec::
+
+# Compile the cargo-fuzz targets.        [CI: fuzz.yml / build-targets]
+#
+# The targets live in a separate workspace that `cargo test` and `just ci` do
+# not build, so a target that stops compiling is otherwise invisible until the
+# nightly campaign runs. Requires a nightly toolchain, cargo-fuzz, and a C++
+# compiler for libfuzzer-sys.
+fuzz-build:
+    cd {{crate}}/fuzz && cargo +nightly fuzz build
+
+# Run one coverage-guided fuzz campaign. `just fuzz-run compute_result 60`
+fuzz-run target seconds="60":
+    cd {{crate}}/fuzz && cargo +nightly fuzz run {{target}} -- -max_total_time={{seconds}}
 
 # Run the parity checker against canonical golden vectors.  [CI: parity-check]
 # Fails if any compute_result output diverges from the locked-in baseline.
 # See apexchainx_calculator/test_snapshots/tests/parity_baseline.json.
 parity-check:
     cd {{crate}} && cargo test --lib parity_tests::
+
+# ------------------------------------------------------------ ts parity ------
+
+# Regenerate the contract-derived artefacts the ts/ helpers are checked against.
+#
+# Executes the real contract in a Soroban Env and writes
+# ts/generated/contractConstants.ts and ts/fixtures/contract-read-semantics.json.
+# Both are committed; see docs/TS_PARITY_CONTRACT.md.
+ts-fixtures:
+    cd {{crate}} && cargo test --lib ts_parity_fixtures
+
+# Type-check the off-chain TypeScript in ts/.          [CI: ts-parity]
+ts-typecheck:
+    npx tsc --noEmit
+
+# Run the TypeScript parity suite against those artefacts.  [CI: ts-parity]
+ts-parity: ts-typecheck
+    npx tsx --test ts/parity/readSemanticsParity.test.ts
+
+# Full TS parity gate: regenerate, fail on an uncommitted diff, then compare.
+#
+# The freshness check is the half that catches a Rust change which never
+# reached TypeScript: if regenerating produces a diff, the contract moved and
+# the artefacts were not committed.
+ts-check: ts-fixtures
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! git diff --quiet -- ts/fixtures ts/generated; then
+        echo ""
+        echo "✗ Contract-derived TS artefacts are stale."
+        echo "  A read semantic changed in Rust but ts/fixtures and ts/generated"
+        echo "  were not regenerated and committed. The diff below IS the change:"
+        echo ""
+        git --no-pager diff -- ts/fixtures ts/generated
+        echo ""
+        echo "  Commit the regenerated files, then run 'just ts-parity' to see"
+        echo "  which hand-written helper in ts/ still disagrees."
+        echo "  See docs/TS_PARITY_CONTRACT.md."
+        exit 1
+    fi
+    just ts-parity
 
 # ---------------------------------------------------------------- lint ------
 
@@ -273,5 +340,5 @@ clean:
     cd {{crate}} && cargo clean
 
 # Everything CI gates on, in CI's order. Run before opening a PR.
-ci: fmt-check lint check no-std test fuzz parity-check wasm machete udeps verify-snapshots
+ci: fmt-check lint check no-std test fuzz fuzz-spec parity-check ts-check wasm machete udeps verify-snapshots
     @echo "✓ local CI equivalent passed"

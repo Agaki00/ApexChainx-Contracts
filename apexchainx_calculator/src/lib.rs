@@ -43,6 +43,10 @@ pub mod error_responses;
 pub mod event;
 pub mod event_correlation;
 mod event_schema;
+/// Spec-assertion bodies shared by the `cargo-fuzz` targets in `fuzz/`.
+/// The targets stay a few lines long and every invariant they check is
+/// compiled and unit-tested here. See `docs/FUZZING_GUARANTEES.md`.
+pub mod fuzz_spec;
 pub mod governance;
 pub mod history;
 pub mod history_snapshot;
@@ -57,10 +61,19 @@ mod parity_tests;
 mod prune_benchmark;
 #[cfg(test)]
 mod schema_migration_tests;
+/// Executable restatement of the contract's documented pure semantics —
+/// the single source of truth imported by tests, the fuzz targets, and the
+/// TypeScript parity fixtures instead of being re-derived in each.
+pub mod spec;
 pub mod storage_estimation;
 #[cfg(test)]
 mod storage_footprint_tests;
 pub mod storage_version;
+/// Generates the contract-derived fixtures that `ts/` parity-checks against.
+/// Test-only: it executes the real contract in an `Env` and writes
+/// `ts/fixtures/contract-read-semantics.json`.
+#[cfg(test)]
+mod ts_parity_fixtures;
 pub mod version_negotiation;
 
 use crate::audit_state::AuditState;
