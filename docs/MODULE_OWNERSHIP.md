@@ -29,7 +29,7 @@ reviewers and merge bottlenecks are reduced.
 | **Contract Core** | Contract Core reviewers | `apexchainx_calculator/src/lib.rs`, `calculation.rs`, `config.rs`, core types and entrypoints |
 | **Contract Governance** | Contract Core reviewers | `governance.rs`, `config_freeze.rs`, role management, pause/unpause |
 | **Contract Infrastructure** | Contract Core reviewers | `storage_version.rs`, `version_negotiation.rs`, `deployment_policy.rs`, `cross_contract_safety.rs` |
-| **Contract Data Layer** | Contract Core reviewers | `history.rs`, `history_snapshot.rs`, `config_metadata.rs`, `config_bundle.rs`, `metadata.rs` |
+| **Contract Data Layer** | Contract Core reviewers | `history.rs`, `config_metadata.rs`, `config_bundle.rs`, `metadata.rs` |
 | **Event System** | Contract Core reviewers | `event.rs`, `event_schema.rs`, `event_correlation.rs`, event test modules |
 | **Audit & Telemetry** | Contract Core reviewers | `audit_state.rs`, `error_responses.rs` |
 | **Testing** | Contract Core reviewers | `tests.rs`, `fuzz_tests.rs`, fuzz targets, property tests |
@@ -62,7 +62,6 @@ All paths are relative to `apexchainx_calculator/src/`.
 | `config_freeze.rs` | Contract Governance | `freeze_config`, `unfreeze_config`, `is_config_frozen` | **Medium** |
 | `metadata.rs` | Contract Governance | `pause`, `unpause`, `is_paused`, `get_pause_info`, `require_not_paused` | **High** |
 | `history.rs` | Contract Data Layer | `get_history`, `prune_history`, `prune_history_by_age`, `get_history_page`, `get_history_page_with_meta`, `get_history_by_outage`, `get_latest_by_outage`, `get_config_count`, `set_retention_limit`, `get_retention_limit` | **High** |
-| `history_snapshot.rs` | Contract Data Layer | `normalize_history` | **Medium** |
 | `config_metadata.rs` | Contract Data Layer | `record_config_update`, `get_last_config_update` | **Medium** |
 | `config_bundle.rs` | Contract Data Layer | (composed types for `get_config_bundle`) | **Low** |
 | `audit_state.rs` | Audit & Telemetry | (composed types for `get_full_audit_state`) | **Low** |
@@ -257,7 +256,7 @@ All paths relative to `.github/workflows/`.
 | `calculation.rs`, `config.rs` | 1 reviewer from Contract Core |
 | `governance.rs`, `config_freeze.rs` | 1 reviewer from Contract Governance |
 | `storage_version.rs`, `version_negotiation.rs`, `cross_contract_safety.rs` | 1 reviewer from Contract Infrastructure |
-| `history.rs`, `history_snapshot.rs`, `config_metadata.rs` | 1 reviewer from Contract Data Layer |
+| `history.rs`, `config_metadata.rs` | 1 reviewer from Contract Data Layer |
 | `event.rs`, `event_schema.rs`, `event_correlation.rs` | 1 reviewer from Event System |
 | Any `.github/workflows/*.yml` | 1 reviewer from DevOps |
 | Any `docs/*.md` | 1 reviewer from Docs |
