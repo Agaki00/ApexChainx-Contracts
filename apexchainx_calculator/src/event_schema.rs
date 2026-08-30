@@ -44,6 +44,23 @@
 //! - repeated writes preserve invocation order; see the regression policy in
 //!   `docs/PROJECT_CONTEXT.md`
 //!
+//! ## sev_add (`sev_add`)
+//! Emitted when `set_custom_severity` registers a **new** custom severity.
+//! - topic[2]: custom severity Symbol
+//! - payload:  (threshold_minutes: u32, penalty_per_minute: i128,
+//!   reward_base: i128)
+//!
+//! ## sev_upd (`sev_upd`)
+//! Emitted when `set_custom_severity` **reconfigures** an existing one.
+//! - topic[2]: custom severity Symbol
+//! - payload:  (threshold_minutes: u32, penalty_per_minute: i128,
+//!   reward_base: i128)
+//!
+//! ## cfg_rem (`cfg_rem`)
+//! Emitted when `remove_custom_severity` deletes a custom severity.
+//! - topic[2]: custom severity Symbol
+//! - payload:  ()
+//!
 //! ## paused (`paused`)
 //! Emitted when the contract is paused.
 //! - topic[2]: caller Address
@@ -195,6 +212,14 @@ pub const EVENT_SETTLE_INTENT: Symbol = symbol_short!("set_int");
 pub const EVENT_CONFIG_UPD: Symbol = symbol_short!("cfg_upd");
 /// Emitted when a custom severity is removed via remove_custom_severity.
 pub const EVENT_CONFIG_REM: Symbol = symbol_short!("cfg_rem");
+/// Emitted when a new custom severity is registered (first creation).
+/// Distinguishable from cfg_upd by indexers: the custom severity did not
+/// exist before this call. (#456)
+pub const EVENT_SEV_ADD: Symbol = symbol_short!("sev_add");
+/// Emitted when an existing custom severity is reconfigured.
+/// Distinguishable from sev_add by indexers: the custom severity already
+/// existed before this call. (#456)
+pub const EVENT_SEV_UPD: Symbol = symbol_short!("sev_upd");
 pub const EVENT_PAUSED: Symbol = symbol_short!("paused");
 pub const EVENT_UNPAUSED: Symbol = symbol_short!("unpause");
 pub const EVENT_OP_SET: Symbol = symbol_short!("op_set");
@@ -237,6 +262,8 @@ mod tests {
             EVENT_SETTLE_INTENT,
             EVENT_CONFIG_UPD,
             EVENT_CONFIG_REM,
+            EVENT_SEV_ADD,
+            EVENT_SEV_UPD,
             EVENT_PAUSED,
             EVENT_UNPAUSED,
             EVENT_OP_SET,

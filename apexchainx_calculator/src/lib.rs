@@ -325,6 +325,23 @@ pub(crate) const EVENT_CONFIG_UPD: Symbol = symbol_short!("cfg_upd");
 /// other removal-style events. The removed severity is carried in topic[2].
 pub(crate) const EVENT_CONFIG_REM: Symbol = symbol_short!("cfg_rem");
 
+/// Emitted when a new custom severity is registered (first creation).
+/// Distinguishable from cfg_upd by indexers: the custom severity did not
+/// exist before this call. (#456)
+///
+/// Compatibility decision: payload is `(threshold_minutes, penalty_per_minute,
+/// reward_base)` — same shape as cfg_upd. The distinct event name lets
+/// indexers separate creation from update without state inspection.
+pub(crate) const EVENT_SEV_ADD: Symbol = symbol_short!("sev_add");
+
+/// Emitted when an existing custom severity is reconfigured.
+/// Distinguishable from sev_add by indexers: the custom severity already
+/// existed before this call. (#456)
+///
+/// Compatibility decision: payload is `(threshold_minutes, penalty_per_minute,
+/// reward_base)` — same shape as cfg_upd.
+pub(crate) const EVENT_SEV_UPD: Symbol = symbol_short!("sev_upd");
+
 /// Emitted when the contract is paused by admin. (#27)
 ///
 /// Compatibility decision: payload is `(true,)`. Empty-tuple expansion is
@@ -1139,6 +1156,11 @@ impl SLACalculatorContract {
         );
 
         env.storage().instance().set(&CONFIG_KEY, &configs);
+        // #455 – Seed CUSTOM_CONFIG_KEY so fresh and migrated contracts
+        // have the same instance-storage key layout.
+        env.storage()
+            .instance()
+            .set(&CUSTOM_CONFIG_KEY, &Map::<Symbol, SLAConfig>::new(&env));
         Self::write_version(&env);
         Ok(())
     }
@@ -1369,7 +1391,10 @@ impl SLACalculatorContract {
         storage_estimation::get_storage_footprint_estimate(&env)
     }
 
-    /// Returns the estimated per-ledger rent cost in stroops based on storage footprint.
+    /// Returns an approximate per-ledger rent cost in stroops based on storage footprint.
+    ///
+    /// **Note (#459):** This is a relative growth proxy, not an authoritative
+    /// rent figure. See `storage_estimation::get_rent_estimate` for details.
     pub fn get_rent_estimate(env: Env) -> Result<i128, SLAError> {
         storage_estimation::get_rent_estimate(&env)
     }
@@ -1592,6 +1617,12 @@ impl SLACalculatorContract {
             .get(&CUSTOM_CONFIG_KEY)
             .unwrap_or_else(|| Map::new(&env));
 
+        // #456 – Determine whether this is a first registration or a
+        // reconfiguration so the emitted event distinguishes the two
+        // lifecycle transitions. Indexers reconstructing the custom-severity
+        // set from events need this to tell "who added" from "who changed".
+        let is_update = custom.contains_key(severity.clone());
+
         custom.set(
             severity.clone(),
             SLAConfig {
@@ -1606,8 +1637,18 @@ impl SLACalculatorContract {
         // #408 – record the config snapshot under its new version hash.
         Self::record_config_registry(&env)?;
 
+        // Emit the lifecycle-appropriate event: sev_add for first
+        // registration, sev_upd for reconfiguration. The payload shape
+        // is identical (threshold, penalty, reward) so consumers that only
+        // care about values can parse either; consumers that need the
+        // lifecycle distinction check topic[0].
+        let event_name = if is_update {
+            EVENT_SEV_UPD
+        } else {
+            EVENT_SEV_ADD
+        };
         env.events().publish(
-            (EVENT_CONFIG_UPD, EVENT_VERSION, severity),
+            (event_name, EVENT_VERSION, severity),
             (threshold_minutes, penalty_per_minute, reward_base),
         );
         Ok(())
@@ -2076,12 +2117,12 @@ impl SLACalculatorContract {
         methods.push_back(method("propose_operator", true, "admin", "op_prop"));
         methods.push_back(method("prune_history", true, "admin", "pruned"));
         methods.push_back(method("prune_history_by_age", true, "admin", "pruned_a"));
-        methods.push_back(method("remove_custom_severity", true, "admin", "cfg_upd"));
+        methods.push_back(method("remove_custom_severity", true, "admin", "cfg_rem"));
         methods.push_back(method("renounce_admin", true, "admin", "adm_ren"));
         methods.push_back(method("replay_calculate_sla", true, "operator", "sla_calc"));
         // Setters:
         methods.push_back(method("set_config", true, "admin", "cfg_upd"));
-        methods.push_back(method("set_custom_severity", true, "admin", "cfg_upd"));
+        methods.push_back(method("set_custom_severity", true, "admin", "sev_add"));
         methods.push_back(method("set_operator", true, "admin", "op_set"));
         methods.push_back(method("set_retention_limit", true, "admin", ""));
         methods.push_back(method("unfreeze_config", true, "admin", "cfg_unfrz"));

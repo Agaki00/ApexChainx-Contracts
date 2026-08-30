@@ -9243,12 +9243,12 @@ fn test_overwrite_existing_custom_severity_emits_event() {
     assert_eq!(cfg2.penalty_per_minute, 75);
     assert_eq!(cfg2.reward_base, 600);
 
-    // Verify EVENT_CONFIG_UPD event was emitted for the update
+    // Verify EVENT_SEV_UPD event was emitted for the update (not cfg_upd)
     let events = env.events().all();
     let (_, topics, data) = events.last().unwrap();
     let topic_0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
     let topic_2: Symbol = topics.get(2).unwrap().try_into_val(&env).unwrap();
-    assert_eq!(topic_0, EVENT_CONFIG_UPD);
+    assert_eq!(topic_0, EVENT_SEV_UPD);
     assert_eq!(topic_2, custom_sev);
     let payload: (u32, i128, i128) = data.try_into_val(&env).unwrap();
     assert_eq!(payload, (15u32, 75i128, 600i128));
