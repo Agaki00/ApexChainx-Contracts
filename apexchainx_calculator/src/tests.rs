@@ -4666,7 +4666,7 @@ fn count_named_event(env: &Env, client: &SLACalculatorContractClient<'static>, n
         if contract_id != client.address {
             continue;
         }
-        if topics.len() >= 1 {
+        if !topics.is_empty() {
             let topic0: Symbol = topics.get(0).unwrap().try_into_val(env).unwrap();
             if topic0 == symbol(env, name) {
                 count += 1;
