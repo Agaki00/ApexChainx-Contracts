@@ -159,6 +159,14 @@ pub fn renounce_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
     env.storage().instance().remove(&ADMIN_KEY);
     env.storage().instance().remove(&PENDING_ADMIN_KEY);
     env.storage().instance().remove(&PENDING_ADMIN_TS_KEY);
+    if env.storage().instance().has(&PENDING_OP_KEY) {
+        // Renounce must invalidate every pending governance proposal: an
+        // adminless contract must not allow a stale operator handoff to fire.
+        env.storage().instance().remove(&PENDING_OP_KEY);
+        env.storage().instance().remove(&PENDING_OP_TS_KEY);
+        env.events()
+            .publish((EVENT_OP_CAN, EVENT_VERSION, caller.clone()), ());
+    }
     env.events()
         .publish((EVENT_ADMIN_REN, EVENT_VERSION, caller.clone()), ());
     Ok(())

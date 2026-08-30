@@ -4654,6 +4654,60 @@ fn test_multiple_replacement_cycles_end_state_is_correct() {
 }
 
 // ============================================================
+// #470 – renounce_admin invalidates a pending operator proposal
+// ============================================================
+
+/// Returns how many events named `name` the contract has emitted so far.
+fn count_named_event(env: &Env, client: &SLACalculatorContractClient<'static>, name: &str) -> usize {
+    let mut count = 0;
+    let events = env.events().all();
+    for i in 0..events.len() {
+        let (contract_id, topics, _) = events.get(i).unwrap();
+        if contract_id != client.address {
+            continue;
+        }
+        if topics.len() >= 1 {
+            let topic0: Symbol = topics.get(0).unwrap().try_into_val(env).unwrap();
+            if topic0 == symbol(env, name) {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+#[test]
+fn test_renounce_admin_clears_pending_operator_proposal() {
+    // Renounce must invalidate a pending operator proposal too; otherwise the
+    // pending candidate could install an operator on an adminless contract.
+    let (env, client, actors) = setup();
+    let pending_op = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &pending_op);
+    assert_eq!(client.get_pending_operator(), Some(pending_op.clone()));
+
+    client.renounce_admin(&actors.admin);
+
+    assert_eq!(client.get_pending_operator(), None);
+    // Invalidation is signalled via an `op_can` event.
+    assert_eq!(count_named_event(&env, &client, "op_can"), 1);
+}
+
+#[test]
+#[should_panic]
+fn test_operator_cannot_accept_after_renounce_with_pending() {
+    // After renounce with a pending operator handoff, the pending candidate
+    // must not be able to accept.
+    let (env, client, actors) = setup();
+    let pending_op = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &pending_op);
+    client.renounce_admin(&actors.admin);
+
+    client.accept_operator(&pending_op); // must panic
+}
+
+// ============================================================
 // #147 – Admin renounce preconditions
 // ============================================================
 
