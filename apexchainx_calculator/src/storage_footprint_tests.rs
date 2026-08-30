@@ -61,9 +61,9 @@ fn storage_key_count_is_stable_after_init() {
     // Keys written eagerly by initialize (see SLACalculatorContract::initialize
     // in lib.rs). Asserting presence pins the post-init footprint so accidental
     // additions or removals are caught.
-    let eagerly_written: [&str; 11] = [
+    let eagerly_written: [&str; 13] = [
         "ADMIN", "OPERATOR", "CONFIG", "PAUSED", "STATS", "CALCCNT", "VIOLCNT", "CALCTS", "VIOLTS", "HIST",
-        "VER",
+        "VER", "TPRUNED", "TTOTENT",
     ];
 
     // Keys intentionally created lazily — they must be absent until the
