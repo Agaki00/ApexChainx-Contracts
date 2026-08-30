@@ -133,7 +133,7 @@ fn test_result_schema_is_explicit_and_stable() {
 fn test_calculate_sla_emits_versioned_integration_event() {
     let (env, client, actors) = setup();
 
-    client.calculate_sla(
+    let stored = client.calculate_sla(
         &actors.operator,
         &symbol_short!("EVT001"),
         &symbol_short!("critical"),
@@ -146,23 +146,35 @@ fn test_calculate_sla_emits_versioned_integration_event() {
     let topic_0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
     let topic_1: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
     let topic_2: Symbol = topics.get(2).unwrap().try_into_val(&env).unwrap();
-    let event_data: (Symbol, Symbol, Symbol, Symbol, u32, u32, i128) = data.try_into_val(&env).unwrap();
+    // Canonical decision field order (#429): the sla_calc payload mirrors the
+    // SLAResult struct order shared with set_int and dup_input, so it decodes
+    // as the full 9-field tuple.
+    let (outage_id, status, mttr, threshold, amount, payment_type, rating, hash, recorded_at): (
+        Symbol,
+        Symbol,
+        u32,
+        u32,
+        i128,
+        Symbol,
+        Symbol,
+        u64,
+        u64,
+    ) = data.try_into_val(&env).unwrap();
 
     assert_eq!(topic_0, EVENT_SLA_CALC);
     assert_eq!(topic_1, EVENT_VERSION);
     assert_eq!(topic_2, symbol_short!("critical"));
-    assert_eq!(
-        event_data,
-        (
-            symbol_short!("EVT001"),
-            symbol_short!("met"),
-            symbol_short!("rew"),
-            symbol_short!("top"),
-            5u32,
-            15u32,
-            1500i128,
-        ),
-    );
+
+    // Every payload field matches the stored decision in canonical order.
+    assert_eq!(outage_id, stored.outage_id);
+    assert_eq!(status, stored.status);
+    assert_eq!(mttr, stored.mttr_minutes);
+    assert_eq!(threshold, stored.threshold_minutes);
+    assert_eq!(amount, stored.amount);
+    assert_eq!(payment_type, stored.payment_type);
+    assert_eq!(rating, stored.rating);
+    assert_eq!(hash, stored.config_version_hash);
+    assert_eq!(recorded_at, stored.recorded_at);
 }
 
 #[test]
@@ -3585,10 +3597,12 @@ fn test_sla_calc_event_topic_count_is_three() {
 }
 
 #[test]
-fn test_sla_calc_event_payload_field_count_is_seven() {
-    // sla_calc payload: (outage_id, status, payment_type, rating, mttr, threshold, amount)
+fn test_sla_calc_event_payload_field_count_is_nine() {
+    // Canonical decision payload (#429): (outage_id, status, mttr_minutes,
+    // threshold_minutes, amount, payment_type, rating, config_version_hash,
+    // recorded_at) — the shared SLAResult struct order.
     let (env, client, actors) = setup();
-    client.calculate_sla(
+    let stored = client.calculate_sla(
         &actors.operator,
         &symbol_short!("EV_SZ2"),
         &symbol_short!("critical"),
@@ -3598,16 +3612,141 @@ fn test_sla_calc_event_payload_field_count_is_seven() {
     let events = env.events().all();
     // Find the sla_calc event (last is set_int, we need sla_calc)
     let (_, _, data) = events.get(events.len() - 2).unwrap();
-    let payload: (Symbol, Symbol, Symbol, Symbol, u32, u32, i128) = data.try_into_val(&env).unwrap();
-    // Destructure to confirm all 7 fields decode without error
-    let (outage_id, status, payment_type, rating, mttr, threshold, amount) = payload;
-    assert_eq!(outage_id, symbol_short!("EV_SZ2"));
-    assert_eq!(status, symbol_short!("met"));
-    assert_eq!(payment_type, symbol_short!("rew"));
-    assert_eq!(rating, symbol_short!("top"));
-    assert_eq!(mttr, 5u32);
-    assert_eq!(threshold, 15u32);
-    assert_eq!(amount, 1500i128);
+    let payload: (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64) =
+        data.try_into_val(&env).unwrap();
+    // Destructure to confirm all 9 fields decode in canonical order.
+    let (outage_id, status, mttr, threshold, amount, payment_type, rating, hash, recorded_at) =
+        payload;
+    assert_eq!(outage_id, stored.outage_id);
+    assert_eq!(status, stored.status);
+    assert_eq!(mttr, stored.mttr_minutes);
+    assert_eq!(threshold, stored.threshold_minutes);
+    assert_eq!(amount, stored.amount);
+    assert_eq!(payment_type, stored.payment_type);
+    assert_eq!(rating, stored.rating);
+    assert_eq!(hash, stored.config_version_hash);
+    assert_eq!(recorded_at, stored.recorded_at);
+}
+
+/// #429 – Guardrail: all three decision-carrying events (sla_calc, set_int,
+/// dup_input) MUST share the same canonical payload field order, or an
+/// indexer's single decoder would misread one of them. If a payload tuple is
+/// reordered or a decision event diverges, this test fails so the drift cannot
+/// reach release without a review + version bump.
+#[test]
+fn test_decision_events_share_canonical_payload_order() {
+    let (env, client, actors) = setup();
+
+    // First submission produces sla_calc + set_int and stores a result.
+    let _stored = client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("CANON1"),
+        &symbol_short!("high"),
+        &10,
+    );
+    // Conflicting resubmission emits dup_input.
+    let _ = client.try_calculate_sla(&actors.operator, &symbol_short!("CANON1"), &symbol_short!("high"), &30);
+
+    // Canonical 9-field order shared by all three decision events (#429).
+    type DecisionPayload = (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64);
+
+    let mut sla_calc_payload: Option<DecisionPayload> = None;
+    let mut set_int_payload: Option<DecisionPayload> = None;
+    let mut dup_input_payload: Option<DecisionPayload> = None;
+
+    let events = env.events().all();
+    for i in 0..events.len() {
+        let (_, topics, data) = events.get(i).unwrap();
+        if topics.len() < 1 {
+            continue;
+        }
+        let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        let payload: DecisionPayload = data.try_into_val(&env).expect(
+            "every decision event must decode as the canonical 9-field tuple",
+        );
+        if name == EVENT_SLA_CALC {
+            sla_calc_payload = Some(payload);
+        } else if name == EVENT_SETTLE_INTENT {
+            set_int_payload = Some(payload);
+        } else if name == EVENT_DUP_INPUT {
+            dup_input_payload = Some(payload);
+        }
+    }
+
+    let sla_calc = sla_calc_payload.expect("sla_calc event not found");
+    let set_int = set_int_payload.expect("set_int event not found");
+    let dup_input = dup_input_payload.expect("dup_input event not found");
+
+    // All three decode to the canonical order; the shared decision fields
+    // (outage_id, status, mttr, threshold, amount, payment_type, rating) must
+    // agree with each other so a single decoder is unambiguous.
+    assert_eq!(sla_calc.0, set_int.0, "outage_id order/index drift");
+    assert_eq!(sla_calc.1, set_int.1, "status order/index drift");
+    assert_eq!(sla_calc.2, set_int.2, "mttr order/index drift");
+    assert_eq!(sla_calc.3, set_int.3, "threshold order/index drift");
+    assert_eq!(sla_calc.4, set_int.4, "amount order/index drift");
+    assert_eq!(sla_calc.5, set_int.5, "payment_type order/index drift");
+    assert_eq!(sla_calc.6, set_int.6, "rating order/index drift");
+
+    assert_eq!(dup_input.0, sla_calc.0, "dup_input outage_id drift");
+    assert_eq!(dup_input.1, sla_calc.1, "dup_input status drift");
+    assert_eq!(dup_input.2, sla_calc.2, "dup_input mttr drift");
+    assert_eq!(dup_input.3, sla_calc.3, "dup_input threshold drift");
+    assert_eq!(dup_input.4, sla_calc.4, "dup_input amount drift");
+    assert_eq!(dup_input.5, sla_calc.5, "dup_input payment_type drift");
+    assert_eq!(dup_input.6, sla_calc.6, "dup_input rating drift");
+}
+
+/// #428 – A consumer processing only `set_int` can reconstruct the full SLA
+/// decision (status, amount, mttr, thresholds, rating, hash) from the event
+/// payload alone, without a follow-up read.
+#[test]
+fn test_set_int_payload_is_self_contained_for_reconciliation() {
+    let (env, client, actors) = setup();
+
+    let stored = client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("SETL1"),
+        &symbol_short!("critical"),
+        &25,
+    );
+    assert_eq!(stored.status, symbol_short!("viol"));
+
+    let events = env.events().all();
+    let mut found = false;
+    for i in 0..events.len() {
+        let (_, topics, data) = events.get(i).unwrap();
+        if topics.len() < 1 {
+            continue;
+        }
+        let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        if name != EVENT_SETTLE_INTENT {
+            continue;
+        }
+        found = true;
+        // set_int now carries the full decision in canonical order (#428).
+        let (outage_id, status, mttr, threshold, amount, payment_type, rating, hash, recorded_at): (
+            Symbol,
+            Symbol,
+            u32,
+            u32,
+            i128,
+            Symbol,
+            Symbol,
+            u64,
+            u64,
+        ) = data.try_into_val(&env).unwrap();
+        assert_eq!(outage_id, stored.outage_id);
+        assert_eq!(status, stored.status);
+        assert_eq!(mttr, stored.mttr_minutes);
+        assert_eq!(threshold, stored.threshold_minutes);
+        assert_eq!(amount, stored.amount);
+        assert_eq!(payment_type, stored.payment_type);
+        assert_eq!(rating, stored.rating);
+        assert_eq!(hash, stored.config_version_hash);
+        assert_eq!(recorded_at, stored.recorded_at);
+    }
+    assert!(found, "set_int event not found");
 }
 
 #[test]
@@ -4292,8 +4431,17 @@ fn test_event_replay_history_matches_emitted_events() {
     // Each history entry outage_id matches the corresponding event payload outage_id
     for i in 0..3u32 {
         let (_, _, data) = sla_events.get(i).unwrap();
-        let (event_outage_id, _, _, _, _, _, _): (Symbol, Symbol, Symbol, Symbol, u32, u32, i128) =
-            data.try_into_val(&env).unwrap();
+        let (event_outage_id, _, _, _, _, _, _, _, _): (
+            Symbol,
+            Symbol,
+            u32,
+            u32,
+            i128,
+            Symbol,
+            Symbol,
+            u64,
+            u64,
+        ) = data.try_into_val(&env).unwrap();
         assert_eq!(history.get(i).unwrap().outage_id, event_outage_id);
     }
 }
@@ -4485,6 +4633,40 @@ fn test_get_version_info_returns_correct_versions_after_init() {
     assert!(!info.needs_migration);
     assert!(!info.is_paused);
     assert_eq!(info.contract_name, symbol_short!("sla_calc"));
+}
+
+#[test]
+fn test_get_version_negotiation_info_exposes_protocol_data() {
+    // #427 – the negotiation data must be reachable from a live contract
+    // method so backends can run the documented multi-contract handshake.
+    let (_env, client, _actors) = setup();
+    let info = client.get_version_negotiation_info();
+    assert_eq!(info.contract_name, symbol_short!("sla_calc"));
+    assert_eq!(info.protocol_version, crate::version_negotiation::PROTOCOL_VERSION);
+    assert_eq!(
+        info.min_compatible_protocol,
+        crate::version_negotiation::MIN_COMPATIBLE_PROTOCOL
+    );
+    assert_eq!(info.storage_version, 1);
+    assert!(!info.is_paused);
+    assert!(!info.needs_migration);
+}
+
+#[test]
+fn test_get_version_negotiation_info_reflects_pause_and_migration_state() {
+    let (env, client, actors) = setup();
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "upgrade"));
+    let info = client.get_version_negotiation_info();
+    assert!(info.is_paused);
+    assert!(!info.needs_migration);
+}
+
+#[test]
+fn test_get_version_negotiation_info_is_deterministic() {
+    let (_env, client, _actors) = setup();
+    let a = client.get_version_negotiation_info();
+    let b = client.get_version_negotiation_info();
+    assert_eq!(a, b);
 }
 
 #[test]
@@ -8757,13 +8939,72 @@ fn test_get_public_api_includes_all_major_methods() {
 }
 
 #[test]
+fn test_get_public_api_auth_labels_are_accurate() {
+    // #426/#427 – the descriptor's `auth` field must reflect the real auth
+    // logic instead of the old "none" (roles) labels.
+    let (_env, client, _actors) = setup();
+    let api = client.get_public_api();
+
+    let mut found_accept_admin = false;
+    let mut found_accept_operator = false;
+    let mut found_get_version_negotiation_info = false;
+
+    for method in api.methods.iter() {
+        if method.name == Symbol::new(&_env, "accept_admin") {
+            found_accept_admin = true;
+            assert_eq!(method.mutates, true);
+            // #426 – not "none": the pending address must authorise.
+            assert_eq!(method.auth, Symbol::new(&_env, "addr"));
+        }
+        if method.name == Symbol::new(&_env, "accept_operator") {
+            found_accept_operator = true;
+            assert_eq!(method.mutates, true);
+            assert_eq!(method.auth, Symbol::new(&_env, "addr"));
+        }
+        if method.name == Symbol::new(&_env, "get_version_negotiation_info") {
+            found_get_version_negotiation_info = true;
+            assert_eq!(method.mutates, false);
+            assert_eq!(method.auth, Symbol::new(&_env, "none"));
+        }
+    }
+
+    assert!(found_accept_admin);
+    assert!(found_accept_operator);
+    assert!(found_get_version_negotiation_info);
+}
+
+#[test]
+fn test_get_public_api_accept_admin_operator_require_auth_not_none() {
+    // #426 – accept_admin/accept_operator call require_auth() and check the
+    // pending-address equality, so the descriptor must NOT label them "none".
+    let (_env, client, _actors) = setup();
+    let api = client.get_public_api();
+
+    let mut found_accept_admin = false;
+    let mut found_accept_operator = false;
+    for method in api.methods.iter() {
+        if method.name == Symbol::new(&_env, "accept_admin") {
+            found_accept_admin = true;
+            assert_eq!(method.mutates, true);
+            assert_eq!(method.auth, Symbol::new(&_env, "addr"));
+        }
+        if method.name == Symbol::new(&_env, "accept_operator") {
+            found_accept_operator = true;
+            assert_eq!(method.mutates, true);
+            assert_eq!(method.auth, Symbol::new(&_env, "addr"));
+        }
+    }
+    assert!(found_accept_admin && found_accept_operator);
+}
+
+#[test]
 fn test_get_public_api_method_count_is_stable() {
     let (_env, client, _actors) = setup();
     let api = client.get_public_api();
-    // 61 methods as of get_contract_info/get_storage_footprint_estimate/
-    // get_rent_estimate being added to the descriptor (#418).
+    // 62 methods as of get_version_negotiation_info being added to the
+    // descriptor (#427). get_public_api / get_contract_info / ... (#418).
     // This test catches accidental additions or removals
-    assert_eq!(api.methods.len(), 61, "Public API method count changed");
+    assert_eq!(api.methods.len(), 62, "Public API method count changed");
 }
 
 #[test]

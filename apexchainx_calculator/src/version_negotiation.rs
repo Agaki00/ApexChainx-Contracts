@@ -23,9 +23,20 @@
 //!
 //! # Integration
 //!
-//! Existing backend-facing endpoints (`get_version_info`, `get_migration_state`)
-//! on the SLA calculator are extended with this protocol so that multi-contract
-//! backends can verify all contracts agree before deploying.
+//! Backend-facing integration surface:
+//!
+//! - `get_version_negotiation_info()` — a live `#[contractimpl]` method on the
+//!   SLA calculator returns this contract's `VersionNegotiationInfo`
+//!   (including `protocol_version` and `min_compatible_protocol`), so a
+//!   multi-contract backend can obtain the data it needs to run
+//!   `negotiate_contract_versions` against a live deployment (#427).
+//! - `get_version_info()` / `get_migration_state()` — existing endpoints that
+//!   continue to expose storage/result-schema and migration state.
+//! - `negotiate_contract_versions()` / `build_negotiation_info()` are the
+//!   pure, library-level rules. A coordinator calls `get_version_negotiation_info`
+//!   on each peer (and itself), assembles the peer list, and invokes
+//!   `negotiate_contract_versions` to decide whether all contracts agree
+//!   before deploying.
 //!
 //! # Changing this module
 //!

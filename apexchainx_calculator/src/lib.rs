@@ -239,9 +239,16 @@ pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
 //
 // ===== Event Payload Schemas =====
 //
-// sla_calc  → (outage_id: Symbol, status: Symbol, payment_type: Symbol,
-//              rating: Symbol, mttr_minutes: u32, threshold_minutes: u32,
-//              amount: i128)
+// The three decision-carrying events (sla_calc, set_int, dup_input) share a
+// single canonical field order — the SLAResult struct order — so indexers
+// parse one layout regardless of which decision event they consume (#429):
+//
+//   decision → (outage_id, status, mttr_minutes, threshold_minutes, amount,
+//               payment_type, rating, config_version_hash, recorded_at)
+//
+// sla_calc  → (outage_id: Symbol, status: Symbol, mttr_minutes: u32,
+//              threshold_minutes: u32, amount: i128, payment_type: Symbol,
+//              rating: Symbol, config_version_hash: u64, recorded_at: u64)
 //   context: severity Symbol
 //
 // cfg_upd   → (threshold_minutes: u32, penalty_per_minute: i128,
@@ -284,8 +291,9 @@ pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
 // op_can    → ()
 //   context: caller Address
 //
-// set_int   → (outage_id: Symbol, status: Symbol, payment_type: Symbol,
-//              amount: i128, config_version_hash: u64, recorded_at: u64)
+// set_int   → (outage_id: Symbol, status: Symbol, mttr_minutes: u32,
+//              threshold_minutes: u32, amount: i128, payment_type: Symbol,
+//              rating: Symbol, config_version_hash: u64, recorded_at: u64)
 //   context: severity Symbol
 //
 // dup_input → (outage_id: Symbol, status: Symbol, mttr_minutes: u32,
@@ -307,8 +315,13 @@ pub(crate) const EVENT_SLA_CALC: Symbol = symbol_short!("sla_calc");
 
 /// Emitted alongside sla_calc for settlement intent reconciliation.
 ///
-/// Compatibility decision: settlement intent fields are ordered by settlement
-/// priority (id, status, payment, amount, hash, timestamp). Field additions
+/// Carries the full SLA decision (including `mttr_minutes`,
+/// `threshold_minutes`, and `rating`) so a consumer processing only the
+/// settlement stream can reconstruct the decision without a follow-up read.
+///
+/// Compatibility decision: shares the canonical decision field order
+/// (`outage_id, status, mttr_minutes, threshold_minutes, amount,
+/// payment_type, rating, config_version_hash, recorded_at`). Field additions
 /// go at the end; any reorder or removal requires a version bump.
 pub(crate) const EVENT_SETTLE_INTENT: Symbol = symbol_short!("set_int");
 
@@ -744,7 +757,13 @@ pub struct PublicApiMethod {
     pub name: Symbol,
     /// Whether the method mutates storage (`true`) or is read-only (`false`).
     pub mutates: bool,
-    /// Auth role required: "admin", "operator", or "none".
+    /// Auth classification. Values:
+    /// - `"admin"` – caller must hold the admin role.
+    /// - `"operator"` – caller must hold the operator role.
+    /// - `"addr"` – only a specific stored address may call (the pending
+    ///   proposal slot holder must sign, e.g. `accept_admin`/`accept_operator`)
+    ///   (#426).
+    /// - `"none"` – no authorization gate (read-only / public).
     pub auth: Symbol,
     /// The primary event name emitted by this method, or `Symbol::new(env, "")` if none.
     pub event: Symbol,
@@ -1976,7 +1995,9 @@ impl SLACalculatorContract {
     /// Each `PublicApiMethod` contains:
     /// - `name`: the contract method name (e.g. "calculate_sla")
     /// - `mutates`: `true` if the method modifies storage
-    /// - `auth`: auth role required — "admin", "operator", or "none"
+    /// - `auth`: auth classification — `"admin"`, `"operator"`, `"addr"`
+    ///   (a specific pending address, e.g. `accept_admin`/`accept_operator`),
+    ///   or `"none"`.
     /// - `event`: the primary event name emitted, or empty if none
     ///
     /// # Errors
@@ -2015,10 +2036,12 @@ impl SLACalculatorContract {
         // All public methods added in alphabetical order for deterministic output.
         // Lifecycle:
         // Note: accept_admin/accept_operator are called by the proposed address
-        // (not the current role holder), so auth is "none" — only an address
-        // equality check against the pending slot is performed.
-        methods.push_back(method("accept_admin", true, "none", "adm_acc"));
-        methods.push_back(method("accept_operator", true, "none", "op_acc"));
+        // (not the current role holder). They still call `caller.require_auth()`
+        // and enforce that the caller equals the pending address, so they are
+        // NOT "none" — they are address-scoped ("addr"— the pending slot holder
+        // must sign) (#426).
+        methods.push_back(method("accept_admin", true, "addr", "adm_acc"));
+        methods.push_back(method("accept_operator", true, "addr", "op_acc"));
         // Calculation:
         methods.push_back(method("calculate_sla", true, "operator", "sla_calc"));
         methods.push_back(method("calculate_sla_view", false, "none", ""));
@@ -2060,6 +2083,7 @@ impl SLACalculatorContract {
         methods.push_back(method("get_storage_footprint_estimate", false, "none", ""));
         methods.push_back(method("get_storage_version", false, "none", ""));
         methods.push_back(method("get_version_info", false, "none", ""));
+        methods.push_back(method("get_version_negotiation_info", false, "none", ""));
         // Health:
         methods.push_back(method("healthcheck", false, "none", ""));
         // Init:
@@ -2984,28 +3008,38 @@ impl SLACalculatorContract {
     }
 
     fn publish_sla_event(env: &Env, severity: Symbol, result: &SLAResult) {
+        // Canonical decision field order (#429): shares the SLAResult struct
+        // order with set_int and dup_input so indexers parse one layout.
         env.events().publish(
             (EVENT_SLA_CALC, EVENT_VERSION, severity),
             (
                 result.outage_id.clone(),
                 result.status.clone(),
-                result.payment_type.clone(),
-                result.rating.clone(),
                 result.mttr_minutes,
                 result.threshold_minutes,
                 result.amount,
+                result.payment_type.clone(),
+                result.rating.clone(),
+                result.config_version_hash,
+                result.recorded_at,
             ),
         );
     }
 
     fn publish_settlement_intent_event(env: &Env, severity: Symbol, result: &SLAResult) {
+        // Canonical decision field order (#429) carrying the full decision
+        // (mttr_minutes, threshold_minutes, rating) so a settlement-only
+        // consumer can reconstruct the SLA decision (#428).
         env.events().publish(
             (EVENT_SETTLE_INTENT, EVENT_VERSION, severity),
             (
                 result.outage_id.clone(),
                 result.status.clone(),
-                result.payment_type.clone(),
+                result.mttr_minutes,
+                result.threshold_minutes,
                 result.amount,
+                result.payment_type.clone(),
+                result.rating.clone(),
                 result.config_version_hash,
                 result.recorded_at,
             ),
@@ -3401,6 +3435,45 @@ impl SLACalculatorContract {
             is_paused,
             contract_name: symbol_short!("sla_calc"),
         })
+    }
+
+    // -------------------------------------------------------------------
+    // SC-W5-078 – Version negotiation endpoint for multi-contract handshake
+    // -------------------------------------------------------------------
+
+    /// Returns the `VersionNegotiationInfo` for this contract, exposing the
+    /// version-negotiation protocol data (`protocol_version`,
+    /// `min_compatible_protocol`, storage version, pause & migration state)
+    /// over a live contract method.
+    ///
+    /// This makes the multi-contract handshake documented in
+    /// `version_negotiation.rs` and `docs/VERSION_NEGOTIATION_CONTRIBUTOR_GUIDE.md`
+    /// actually runnable: a coordinator/backend calls this on each peer to
+    /// obtain the `protocol_version`/`min_compatible_protocol` it needs to
+    /// feed `negotiate_contract_versions` off-chain (or via a cross-contract
+    /// coordinator), instead of the data living only in dead code (#427).
+    ///
+    /// Like `get_version_info`, this intentionally bypasses `check_version`
+    /// so it remains callable even in a pre-migration or pre-init state.
+    ///
+    /// # Returns
+    /// The `VersionNegotiationInfo` for this contract (empty peers: a
+    /// coordinator can then run the negotiation rules against a peer list it
+    /// assembles from these responses).
+    pub fn get_version_negotiation_info(
+        env: Env,
+    ) -> Result<crate::version_negotiation::VersionNegotiationInfo, SLAError> {
+        let stored_version: u32 = env
+            .storage()
+            .instance()
+            .get(&STORAGE_VERSION_KEY)
+            .ok_or(SLAError::NotInitialized)?;
+        let is_paused: bool = env.storage().instance().get(&PAUSED_KEY).unwrap_or(false);
+        Ok(crate::version_negotiation::build_negotiation_info(
+            stored_version,
+            STORAGE_VERSION,
+            is_paused,
+        ))
     }
 
     // -------------------------------------------------------------------

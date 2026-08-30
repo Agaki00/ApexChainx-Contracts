@@ -423,11 +423,13 @@ fn publish_sla_event(env: &Env, severity: Symbol, result: &SLAResult) {
         (
             result.outage_id.clone(),
             result.status.clone(),
-            result.payment_type.clone(),
-            result.rating.clone(),
             result.mttr_minutes,
             result.threshold_minutes,
             result.amount,
+            result.payment_type.clone(),
+            result.rating.clone(),
+            result.config_version_hash,
+            result.recorded_at,
         ),
     );
 }
@@ -438,8 +440,11 @@ fn publish_settlement_intent_event(env: &Env, severity: Symbol, result: &SLAResu
         (
             result.outage_id.clone(),
             result.status.clone(),
-            result.payment_type.clone(),
+            result.mttr_minutes,
+            result.threshold_minutes,
             result.amount,
+            result.payment_type.clone(),
+            result.rating.clone(),
             result.config_version_hash,
             result.recorded_at,
         ),

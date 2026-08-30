@@ -13,18 +13,31 @@
 //!
 //! # Event Catalog
 //!
+//! The three decision-carrying events (`sla_calc`, `set_int`, `dup_input`)
+//! share a single canonical payload field order — the `SLAResult` struct
+//! order — so indexers parse one layout regardless of which decision event
+//! they consume. Any divergence between them is a bug (#429). The canonical
+//! order is:
+//!
+//!   (outage_id, status, mttr_minutes, threshold_minutes, amount,
+//!    payment_type, rating, config_version_hash, recorded_at)
+//!
 //! ## sla_calc (`sla_calc`)
 //! Emitted on every successful `calculate_sla` call.
 //! - topic[2]: severity Symbol
-//! - payload:  (outage_id: Symbol, status: Symbol, payment_type: Symbol,
-//!   rating: Symbol, mttr_minutes: u32, threshold_minutes: u32,
-//!   amount: i128)
+//! - payload:  (outage_id: Symbol, status: Symbol, mttr_minutes: u32,
+//!   threshold_minutes: u32, amount: i128, payment_type: Symbol,
+//!   rating: Symbol, config_version_hash: u64, recorded_at: u64)
 //!
 //! ## set_int (`set_int`)
 //! Settlement intent emitted alongside sla_calc for backend reconciliation.
+//! Carries the full decision (including `mttr_minutes`, `threshold_minutes`,
+//! and `rating`) so a settlement-only consumer can reconstruct the SLA
+//! decision without a follow-up read (#428).
 //! - topic[2]: severity Symbol
-//! - payload:  (outage_id: Symbol, status: Symbol, payment_type: Symbol,
-//!   amount: i128, config_version_hash: u64, recorded_at: u64)
+//! - payload:  (outage_id: Symbol, status: Symbol, mttr_minutes: u32,
+//!   threshold_minutes: u32, amount: i128, payment_type: Symbol,
+//!   rating: Symbol, config_version_hash: u64, recorded_at: u64)
 //!
 //! ## dup_input (`dup_input`)
 //! Emitted when `calculate_sla` rejects a conflicting duplicate `outage_id`
