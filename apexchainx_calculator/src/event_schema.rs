@@ -89,6 +89,12 @@
 //! - topic[2]: caller Address
 //! - payload:  ()
 //!
+//! ## adm_sup (`adm_sup`)
+//! Emitted when a pending admin proposal is superseded by a re-proposal
+//! before the prior candidate accepted or cancelled. (#468)
+//! - topic[2]: caller Address
+//! - payload:  (superseded_admin: Address, new_admin: Address)
+//!
 //! ## op_prop (`op_prop`)
 //! Emitted when a new operator is proposed.
 //! - topic[2]: caller Address
@@ -103,6 +109,12 @@
 //! Emitted when a pending operator proposal is cancelled.
 //! - topic[2]: caller Address
 //! - payload:  ()
+//!
+//! ## op_sup (`op_sup`)
+//! Emitted when a pending operator proposal is superseded by a re-proposal
+//! before the prior candidate accepted or cancelled. (#468)
+//! - topic[2]: caller Address
+//! - payload:  (superseded_operator: Address, new_operator: Address)
 //!
 //! ## cfg_frz (`cfg_frz`)
 //! Emitted when the configuration is frozen by admin.
@@ -207,6 +219,10 @@ pub const EVENT_ADMIN_REN: Symbol = symbol_short!("adm_ren");
 pub const EVENT_OP_PROP: Symbol = symbol_short!("op_prop");
 pub const EVENT_OP_ACC: Symbol = symbol_short!("op_acc");
 pub const EVENT_OP_CAN: Symbol = symbol_short!("op_can");
+/// Emitted when a pending admin proposal is superseded by a re-proposal. (#468)
+pub const EVENT_ADMIN_SUP: Symbol = symbol_short!("adm_sup");
+/// Emitted when a pending operator proposal is superseded by a re-proposal. (#468)
+pub const EVENT_OP_SUP: Symbol = symbol_short!("op_sup");
 pub const EVENT_CONFIG_FREEZE: Symbol = symbol_short!("cfg_frz");
 pub const EVENT_CONFIG_UNFREEZE: Symbol = symbol_short!("cfg_unfrz");
 /// Emitted when a running-stats counter saturates. (SC-W5-047)
@@ -246,9 +262,11 @@ mod tests {
             EVENT_ADMIN_ACC,
             EVENT_ADMIN_CAN,
             EVENT_ADMIN_REN,
+            EVENT_ADMIN_SUP,
             EVENT_OP_PROP,
             EVENT_OP_ACC,
             EVENT_OP_CAN,
+            EVENT_OP_SUP,
             EVENT_CONFIG_FREEZE,
             EVENT_CONFIG_UNFREEZE,
             EVENT_STATS_SAT,

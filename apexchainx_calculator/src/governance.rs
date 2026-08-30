@@ -1,16 +1,19 @@
-//! Two-step admin and operator transfer governance.
-//!
+//! Two-step admin and operator transfer governance.//! 
 //! This module implements the two-step handoff pattern for admin and operator
 //! role transfers, plus admin renounce and single-step operator assignment.
 //! All functions require the appropriate role authorization and emit versioned
-//! governance events for backend audit trails.
+//! governance events for backend audit trails. Re-proposing a role while a
+//! proposal is pending replaces the candidate and emits a supersession event
+//! (`adm_sup`/`op_sup`) so the pending-slot history stays reconstructable.
+
 
 use soroban_sdk::{Address, Env, Symbol};
 
 use crate::{
-    SLAError, ADMIN_KEY, EVENT_ADMIN_ACC, EVENT_ADMIN_CAN, EVENT_ADMIN_PROP, EVENT_ADMIN_REN, EVENT_OP_ACC,
-    EVENT_OP_CAN, EVENT_OP_PROP, EVENT_OP_SET, EVENT_VERSION, OPERATOR_KEY, PENDING_ADMIN_KEY,
-    PENDING_ADMIN_TS_KEY, PENDING_OP_KEY, PENDING_OP_TS_KEY,
+    SLAError, ADMIN_KEY, EVENT_ADMIN_ACC, EVENT_ADMIN_CAN, EVENT_ADMIN_PROP, EVENT_ADMIN_REN,
+    EVENT_ADMIN_SUP, EVENT_OP_ACC, EVENT_OP_CAN, EVENT_OP_PROP, EVENT_OP_SET, EVENT_OP_SUP,
+    EVENT_VERSION, OPERATOR_KEY, PENDING_ADMIN_KEY, PENDING_ADMIN_TS_KEY, PENDING_OP_KEY,
+    PENDING_OP_TS_KEY,
 };
 
 /// Window (in ledger seconds) after which a pending proposal expires.
@@ -36,10 +39,20 @@ pub fn propose_admin(env: &Env, caller: &Address, new_admin: &Address) -> Result
     crate::SLACalculatorContract::check_version(env)?;
     crate::config_freeze::require_not_frozen(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
+    let superseded: Option<Address> = env.storage().instance().get(&PENDING_ADMIN_KEY);
     env.storage().instance().set(&PENDING_ADMIN_KEY, new_admin);
     env.storage()
         .instance()
         .set(&PENDING_ADMIN_TS_KEY, &env.ledger().timestamp());
+    if let Some(previous) = superseded {
+        // A re-proposal supersedes the pending candidate. Publish the
+        // supersession first so the event stream records the replacement
+        // before the new proposal, letting consumers reconstruct the slot.
+        env.events().publish(
+            (EVENT_ADMIN_SUP, EVENT_VERSION, caller.clone()),
+            (previous, new_admin.clone()),
+        );
+    }
     env.events().publish(
         (EVENT_ADMIN_PROP, EVENT_VERSION, caller.clone()),
         (new_admin.clone(),),
@@ -96,10 +109,17 @@ pub fn propose_operator(env: &Env, caller: &Address, new_operator: &Address) -> 
     crate::SLACalculatorContract::check_version(env)?;
     crate::config_freeze::require_not_frozen(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
+    let superseded: Option<Address> = env.storage().instance().get(&PENDING_OP_KEY);
     env.storage().instance().set(&PENDING_OP_KEY, new_operator);
     env.storage()
         .instance()
         .set(&PENDING_OP_TS_KEY, &env.ledger().timestamp());
+    if let Some(previous) = superseded {
+        env.events().publish(
+            (EVENT_OP_SUP, EVENT_VERSION, caller.clone()),
+            (previous, new_operator.clone()),
+        );
+    }
     env.events().publish(
         (EVENT_OP_PROP, EVENT_VERSION, caller.clone()),
         (new_operator.clone(),),
