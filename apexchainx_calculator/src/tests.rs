@@ -4654,6 +4654,64 @@ fn test_multiple_replacement_cycles_end_state_is_correct() {
 }
 
 // ============================================================
+// #469 – set_operator invalidates a pending operator proposal
+// ============================================================
+
+/// Returns how many events named `name` the contract has emitted so far.
+fn count_named_event(env: &Env, client: &SLACalculatorContractClient<'static>, name: &str) -> usize {
+    let mut count = 0;
+    let events = env.events().all();
+    for i in 0..events.len() {
+        let (contract_id, topics, _) = events.get(i).unwrap();
+        if contract_id != client.address {
+            continue;
+        }
+        if topics.len() >= 1 {
+            let topic0: Symbol = topics.get(0).unwrap().try_into_val(env).unwrap();
+            if topic0 == symbol(env, name) {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+#[test]
+fn test_set_operator_clears_pending_operator_proposal() {
+    // A direct set_operator must invalidate any pending operator proposal.
+    let (env, client, actors) = setup();
+    let pending_op = soroban_sdk::Address::generate(&env);
+    let direct_op = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &pending_op);
+    assert_eq!(client.get_pending_operator(), Some(pending_op.clone()));
+
+    client.set_operator(&actors.admin, &direct_op);
+
+    // Pending proposal cleared, direct assignment installed.
+    assert_eq!(client.get_pending_operator(), None);
+    assert_eq!(client.get_operator(), direct_op);
+    // Invalidation is signalled via an `op_can` event.
+    assert_eq!(count_named_event(&env, &client, "op_can"), 1);
+}
+
+#[test]
+#[should_panic]
+fn test_superseded_operator_cannot_accept_after_direct_set() {
+    // After set_operator invalidates the pending slot, the stale candidate
+    // must not be able to complete the handoff.
+    let (env, client, actors) = setup();
+    let pending_op = soroban_sdk::Address::generate(&env);
+    let direct_op = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &pending_op);
+    client.set_operator(&actors.admin, &direct_op);
+
+    // Stale pending candidate tries to accept — must panic.
+    client.accept_operator(&pending_op);
+}
+
+// ============================================================
 // #147 – Admin renounce preconditions
 // ============================================================
 
