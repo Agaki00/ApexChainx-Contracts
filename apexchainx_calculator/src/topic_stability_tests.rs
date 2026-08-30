@@ -16,13 +16,11 @@ mod topic_stability_tests {
         TryIntoVal,
     };
     use crate::{
-        EVENT_ADMIN_ACC, EVENT_ADMIN_CAN, EVENT_ADMIN_PROP, EVENT_ADMIN_REN, EVENT_CONFIG_UPD,
-        EVENT_OP_ACC, EVENT_OP_CAN, EVENT_OP_PROP, EVENT_OP_SET, EVENT_PAUSED, EVENT_PRUNED,
-        EVENT_PRUNED_AGE, EVENT_SETTLE_INTENT, EVENT_SLA_CALC, EVENT_UNPAUSED, EVENT_VERSION,
-        SLACalculatorContract, SLACalculatorContractClient,
+        EVENT_CONFIG_UPD, EVENT_PAUSED, EVENT_SETTLE_INTENT, EVENT_SLA_CALC, EVENT_UNPAUSED,
+        EVENT_VERSION, SLACalculatorContract, SLACalculatorContractClient,
     };
 
-    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
+    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
         env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(env, &contract_id);
@@ -63,7 +61,7 @@ mod topic_stability_tests {
         let env = Env::default();
         let (_admin, _operator, client) = setup(&env);
         let stranger = Address::generate(&env);
-        client.pause(&stranger);
+        client.pause(&stranger, &soroban_sdk::String::from_str(&env, "test"));
     }
 
     #[test]
@@ -76,12 +74,14 @@ mod topic_stability_tests {
     }
 
     /// Assert that an event has exactly 3 topics with the expected structure.
-    fn assert_topic_structure(env: &Env, topics: &soroban_sdk::Vec<Symbol>, expected_name: Symbol) {
+    fn assert_topic_structure(env: &Env, topics: &soroban_sdk::Vec<soroban_sdk::Val>, expected_name: Symbol) {
         assert_eq!(topics.len(), 3, "Event must have exactly 3 topics");
 
         let name: Symbol = topics.get(0).unwrap().try_into_val(env).unwrap();
         let version: Symbol = topics.get(1).unwrap().try_into_val(env).unwrap();
-        let _context: Symbol = topics.get(2).unwrap().try_into_val(env).unwrap();
+        // topic[2] is event-specific context: a Symbol (severity) for sla_calc
+        // and set_int, an Address (caller) for paused/unpause, etc.
+        let _context = topics.get(2).unwrap();
 
         assert_eq!(name, expected_name, "topic[0] must be the event name");
         assert_eq!(
@@ -134,12 +134,8 @@ mod topic_stability_tests {
         ];
 
         for (i, sev) in severities.iter().enumerate() {
-            client.calculate_sla(
-                &operator,
-                &symbol_short!("TOPIC"),
-                sev,
-                &(10u32 + i as u32),
-            );
+            let id = Symbol::new(&env, &alloc::format!("TOPIC{}", i));
+            client.calculate_sla(&operator, &id, sev, &(10u32 + i as u32));
         }
 
         let events = env.events().all();
@@ -189,7 +185,7 @@ mod topic_stability_tests {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
 
-        client.pause(&admin);
+        client.pause(&admin, &soroban_sdk::String::from_str(&env, "test"));
 
         let events = env.events().all();
         let (_, topics, _) = events.last().unwrap();
@@ -201,7 +197,7 @@ mod topic_stability_tests {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
 
-        client.pause(&admin);
+        client.pause(&admin, &soroban_sdk::String::from_str(&env, "test"));
         client.unpause(&admin);
 
         let events = env.events().all();
@@ -226,7 +222,7 @@ mod topic_stability_tests {
             &5,
         );
         client.set_config(&admin, &symbol_short!("critical"), &20, &200, &1000);
-        client.pause(&admin);
+        client.pause(&admin, &soroban_sdk::String::from_str(&env, "test"));
         client.unpause(&admin);
         client.propose_admin(&admin, &new_admin);
         client.cancel_admin_proposal(&admin);

@@ -2277,6 +2277,43 @@ fn test_get_contract_metadata_returns_expected_fields() {
 }
 
 #[test]
+fn test_get_contract_metadata_and_info_advertise_same_features() {
+    // #424 – both introspection endpoints must return the same feature set,
+    // derived from a single source of truth (contract_info::CONTRACT_FEATURES).
+    let (_env, client, _actors) = setup();
+    let meta = client.get_contract_metadata();
+    let info = client.get_contract_info();
+
+    assert_eq!(
+        meta.features.len(),
+        info.features.len(),
+        "feature-list length must agree across endpoints"
+    );
+    for idx in 0..meta.features.len() {
+        assert_eq!(
+            meta.features.get(idx).unwrap(),
+            info.features.get(idx).unwrap(),
+            "feature list must agree element-wise across endpoints"
+        );
+    }
+
+    // The advertised set must match reality: ctrctinfo (self-introspection) is
+    // present, but the unimplemented corr_id must NOT be advertised (#424).
+    let mut has_corr_id = false;
+    let mut has_ctrctinfo = false;
+    for idx in 0..meta.features.len() {
+        let f = meta.features.get(idx).unwrap();
+        if f == symbol_short!("corr_id") {
+            has_corr_id = true;
+        }
+        if f == symbol_short!("ctrctinfo") {
+            has_ctrctinfo = true;
+        }
+    }
+    assert!(!has_corr_id, "corr_id is unimplemented and must not be advertised");
+    assert!(has_ctrctinfo, "ctrctinfo is a reachable capability and must be advertised");
+}
+#[test]
 fn test_get_contract_metadata_severities_are_canonical() {
     let (_env, client, _actors) = setup();
     let meta = client.get_contract_metadata();
@@ -8728,7 +8765,8 @@ fn test_get_public_api_includes_all_major_methods() {
         if method.name == Symbol::new(&_env, "initialize") {
             found_initialize = true;
             assert!(method.mutates);
-            assert_eq!(method.auth, Symbol::new(&_env, "admin"));
+            // #425 – initialize requires BOTH admin and operator authorization.
+            assert_eq!(method.auth, Symbol::new(&_env, "multi"));
         }
         if method.name == Symbol::new(&_env, "get_config") {
             found_get_config = true;
@@ -8754,6 +8792,24 @@ fn test_get_public_api_includes_all_major_methods() {
     assert!(found_get_config, "get_config not found in API descriptor");
     assert!(found_healthcheck, "healthcheck not found in API descriptor");
     assert!(found_migrate, "migrate not found in API descriptor");
+}
+
+#[test]
+fn test_get_public_api_initialize_auth_is_multi() {
+    // #425 – initialize requires BOTH admin and operator authorization, so the
+    // descriptor must advertise the two-party value "multi", not "admin".
+    let (_env, client, _actors) = setup();
+    let api = client.get_public_api();
+
+    let mut found_initialize = false;
+    for method in api.methods.iter() {
+        if method.name == Symbol::new(&_env, "initialize") {
+            found_initialize = true;
+            assert!(method.mutates);
+            assert_eq!(method.auth, Symbol::new(&_env, "multi"));
+        }
+    }
+    assert!(found_initialize);
 }
 
 #[test]
