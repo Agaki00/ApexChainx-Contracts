@@ -501,11 +501,26 @@ pub enum SLAError {
     /// | `outage_id` exists **and** the config version hash is **unchanged** **but** the inputs **differ** | **DuplicateOutageInput** error — the caller submitted contradictory data for the same outage under the same config |
     /// | `outage_id` exists **and** the config version hash **changed** | Treated as a **fresh calculation** — the config update invalidates the previous entry, so the new result is appended to history |
     ///
+    /// # Severity-Blind Detection
+    ///
+    /// The duplicate detection is **severity-blind**: it compares only `mttr_minutes`
+    /// and `threshold_minutes` (via the config hash), not the severity argument.
+    /// This means that if two severities have identical configuration parameters
+    /// (e.g., both high and medium configured with threshold 30 / penalty 50 / reward 750),
+    /// resubmitting the same outage under a different severity with the same MTTR is
+    /// treated as an idempotent replay, not a conflict.
+    ///
+    /// **Rationale:** The stored `SLAResult` does not carry a severity field, so
+    /// the contract cannot distinguish severity-only changes from true replays.
+    /// Adding severity to the result schema requires a breaking migration. Until
+    /// that migration is implemented, the contract treats severity as a routing
+    /// parameter rather than a data dimension for duplicate detection.
+    ///
     /// # Consumer guidance
     ///
     /// Backend callers that receive this error should:
-    /// 1. Check whether the submitted `mttr_minutes` or severity level was
-    ///    entered incorrectly (typo, stale measurement).
+    /// 1. Check whether the submitted `mttr_minutes` was entered incorrectly
+    ///    (typo, stale measurement).
     /// 2. If the previous calculation was incorrect, the admin must call
     ///    `prune_history` to remove the conflicting entry before
     ///    re-submitting with corrected values — or wait for a config
@@ -3433,12 +3448,39 @@ impl SLACalculatorContract {
     /// This function intentionally bypasses `check_version` (like
     /// `get_version_info` and `get_migration_state`) so it remains callable
     /// even when the contract is in a pre-migration or pre-init state.
+    ///
+    /// # Readiness Definition
+    ///
+    /// The healthcheck returns `ready: true` only when the contract is:
+    /// - Initialized (storage version matches expected version)
+    /// - Has an admin (not permanently renounced)
+    ///
+    /// This definition focuses on operational readiness for governance functions.
+    /// Pause/freeze states are not included in the readiness check to keep the
+    /// probe simple; operators should use `get_contract_state_fingerprint` for
+    /// full state visibility.
+    ///
+    /// # Status Vocabulary
+    ///
+    /// - `noinit`: Contract has never been initialized
+    /// - `migrate`: Storage version mismatch, migration required
+    /// - `noadmin`: Admin has been permanently renounced (governance-dead)
+    /// - `ok`: Contract is operational and has an admin
     pub fn healthcheck(env: Env) -> HealthcheckResult {
         let stored_version: Option<u32> = env.storage().instance().get(&STORAGE_VERSION_KEY);
+        let admin_renounced: Option<bool> = env.storage().instance().get(&ADMIN_RENOUNCED_KEY);
+
         let (ready, status) = match stored_version {
             None => (false, symbol_short!("noinit")),
             Some(v) if v != STORAGE_VERSION => (false, symbol_short!("migrate")),
-            Some(_) => (true, symbol_short!("ok")),
+            Some(_) => {
+                // Check if admin has been permanently renounced
+                if admin_renounced == Some(true) {
+                    (false, symbol_short!("noadmin"))
+                } else {
+                    (true, symbol_short!("ok"))
+                }
+            }
         };
         HealthcheckResult {
             ready,

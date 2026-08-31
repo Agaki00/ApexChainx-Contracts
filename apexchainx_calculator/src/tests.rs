@@ -6724,6 +6724,34 @@ fn test_duplicate_same_config_with_different_mttr_still_panics() {
 }
 
 #[test]
+fn test_duplicate_detection_is_severity_blind() {
+    // When two severities have identical configs, resubmitting the same outage
+    // under a different severity with the same MTTR is treated as an idempotent replay.
+    let (_env, client, actors) = setup();
+    let outage_id = symbol_short!("SEV_BLIND");
+
+    // Configure high and medium with identical parameters
+    client.set_config(&actors.admin, &symbol_short!("high"), &30, &50, &750);
+    client.set_config(&actors.admin, &symbol_short!("medium"), &30, &50, &750);
+
+    // Submit under high severity
+    let r1 = client.calculate_sla(&actors.operator, &outage_id, &symbol_short!("high"), &10);
+
+    // Resubmit under medium severity with same MTTR - should be idempotent replay
+    let r2 = client.calculate_sla(&actors.operator, &outage_id, &symbol_short!("medium"), &10);
+
+    // Both should return the same result (from the first submission)
+    assert_eq!(r1.config_version_hash, r2.config_version_hash);
+    assert_eq!(r1.mttr_minutes, r2.mttr_minutes);
+    assert_eq!(r1.threshold_minutes, r2.threshold_minutes);
+    assert_eq!(r1.amount, r2.amount);
+
+    // Only one entry in history (severity-blind detection)
+    assert_eq!(client.get_history().len(), 1);
+    assert_eq!(client.get_stats().total_calculations, 1);
+}
+
+#[test]
 fn test_255_prune_reduces_history_to_keep_latest() {
     // After prune_history(keep=3), exactly 3 entries remain (the most recent).
     let (env, client, actors) = setup();
@@ -7715,6 +7743,23 @@ fn test_healthcheck_returns_not_ready_on_version_mismatch() {
     let hc = client.healthcheck();
     assert!(!hc.ready);
     assert_eq!(hc.status, symbol_short!("migrate"));
+}
+
+#[test]
+fn test_healthcheck_returns_not_ready_after_renounce_admin() {
+    let (_env, client, actors) = setup();
+    // Contract should be ready initially
+    let hc_before = client.healthcheck();
+    assert!(hc_before.ready);
+    assert_eq!(hc_before.status, symbol_short!("ok"));
+
+    // Renounce admin
+    client.renounce_admin(&actors.admin);
+
+    // Healthcheck should now report not ready with noadmin status
+    let hc_after = client.healthcheck();
+    assert!(!hc_after.ready);
+    assert_eq!(hc_after.status, symbol_short!("noadmin"));
 }
 
 #[test]
