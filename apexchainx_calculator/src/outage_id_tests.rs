@@ -3,7 +3,7 @@ mod outage_id_tests {
     use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
     use crate::{SLACalculatorContract, SLACalculatorContractClient};
 
-    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
+    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
         env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(env, &contract_id);
@@ -42,7 +42,7 @@ mod outage_id_tests {
     }
 
     #[test]
-    fn test_repeated_outage_id_each_recorded() {
+    fn test_repeated_identical_outage_is_idempotent() {
         let env = Env::default();
         let (_admin, operator, client) = setup(&env);
         let outage_id = symbol_short!("INC01");
@@ -51,7 +51,10 @@ mod outage_id_tests {
         client.calculate_sla(&operator, &outage_id, &symbol_short!("high"), &10);
 
         let stats = client.get_stats();
-        assert_eq!(stats.total_calculations, 2);
+        assert_eq!(
+            stats.total_calculations, 1,
+            "identical re-submission must not double-record history"
+        );
     }
 
     #[test]

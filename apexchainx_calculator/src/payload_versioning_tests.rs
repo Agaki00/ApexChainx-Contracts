@@ -16,12 +16,11 @@ mod payload_versioning_tests {
         TryIntoVal,
     };
     use crate::{
-        EVENT_CONFIG_UPD, EVENT_PAUSED, EVENT_PRUNED, EVENT_PRUNED_AGE, EVENT_SETTLE_INTENT,
-        EVENT_SLA_CALC, EVENT_UNPAUSED, EVENT_VERSION, SLACalculatorContract,
+        EVENT_SLA_CALC, EVENT_SETTLE_INTENT, EVENT_VERSION, SLACalculatorContract,
         SLACalculatorContractClient,
     };
 
-    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
+    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
         env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(env, &contract_id);
@@ -144,7 +143,7 @@ mod payload_versioning_tests {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
 
-        client.pause(&admin);
+        client.pause(&admin, &soroban_sdk::String::from_str(&env, "test"));
 
         let events = env.events().all();
         let (_, _, data) = events.last().unwrap();
@@ -157,7 +156,7 @@ mod payload_versioning_tests {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
 
-        client.pause(&admin);
+        client.pause(&admin, &soroban_sdk::String::from_str(&env, "test"));
         client.unpause(&admin);
 
         let events = env.events().all();
@@ -171,19 +170,16 @@ mod payload_versioning_tests {
     #[test]
     fn test_prune_payload_is_two_u32s() {
         let env = Env::default();
+        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
         let operator = Address::generate(&env);
         client.initialize(&admin, &operator);
 
-        for _ in 0..5u32 {
-            client.calculate_sla(
-                &operator,
-                &symbol_short!("PR_VER"),
-                &symbol_short!("low"),
-                &10,
-            );
+        for i in 0..5u32 {
+            let id = Symbol::new(&env, &alloc::format!("PR_VER{}", i));
+            client.calculate_sla(&operator, &id, &symbol_short!("low"), &10);
         }
 
         client.prune_history(&admin, &2);
@@ -208,7 +204,7 @@ mod payload_versioning_tests {
             &5,
         );
         client.set_config(&admin, &symbol_short!("critical"), &20, &200, &1000);
-        client.pause(&admin);
+        client.pause(&admin, &soroban_sdk::String::from_str(&env, "test"));
         client.unpause(&admin);
 
         let events = env.events().all();
@@ -290,6 +286,6 @@ mod payload_versioning_tests {
         let env = Env::default();
         let (_admin, _operator, client) = setup(&env);
         let stranger = Address::generate(&env);
-        client.pause(&stranger);
+        client.pause(&stranger, &soroban_sdk::String::from_str(&env, "test"));
     }
 }
