@@ -27,6 +27,53 @@ use crate::{SLACalculatorContract, SLAError, RESULT_SCHEMA_VERSION, STORAGE_VERS
 /// Increment when fields are added, removed, or reordered.
 pub const CONTRACT_INFO_SCHEMA_VERSION: u32 = 1;
 
+/// #424 – Single source of truth for the advertised feature set.
+///
+/// Both introspection endpoints (`get_contract_info` and the legacy
+/// `get_contract_metadata`) must derive their `features` from this one list so
+/// they can never disagree. Every flag here corresponds to a reachable,
+/// tested capability:
+///
+/// - `calc` – SLA calculation & events
+/// - `audit` – the audit log surface
+/// - `pause` – `pause`/`unpause`
+/// - `stats` – calculation statistics
+/// - `history` – history/readback of stored results
+/// - `failcode` – explicit `SLAError` failure codes
+/// - `safe_call` – `try_*` safe-call wrappers
+/// - `ver_nego` – version-negotiation (`get_version_negotiation_info`)
+/// - `freeze` – config freeze/unfreeze
+/// - `ctrctinfo` – contract self-introspection (`get_contract_info`)
+///
+/// `corr_id` (cross-contract correlation tracing) is deliberately absent: the
+/// correlation module is not wired, so advertising it would tell backends to
+/// enable tracing logic that will receive no data (#424).
+pub(crate) const CONTRACT_FEATURES: [&str; 10] = [
+    "calc",
+    "audit",
+    "pause",
+    "stats",
+    "history",
+    "failcode",
+    "safe_call",
+    "ver_nego",
+    "freeze",
+    "ctrctinfo",
+];
+
+/// #423 – The crate version, in the Symbol form used by `ContractInfo`.
+///
+/// Derived from `CARGO_PKG_VERSION` (e.g. `"0.1.0"`) by replacing the dots
+/// with underscores per the existing `0_1_0` convention, so the reported
+/// `contract_version` can never silently drift from the Cargo package version.
+///
+/// The conversion is deterministic and stable across calls: same input string,
+/// same Symbol. The string is short enough (≤9 bytes) for a `Symbol::new`.
+pub fn cargo_pkg_version_symbol(env: &Env) -> Symbol {
+    let dotted = env!("CARGO_PKG_VERSION").replace('.', "_");
+    Symbol::new(env, &dotted)
+}
+
 /// #191 – Comprehensive, versioned contract information for all read surfaces.
 ///
 /// Backend consumers should call `get_contract_info()` once at startup (and
@@ -97,23 +144,18 @@ pub fn get_contract_info(env: &Env) -> Result<ContractInfo, SLAError> {
 
     let severities = SLACalculatorContract::canonical_severities(env);
 
+    // #424 – single source of truth for the advertised feature set, shared
+    // with the legacy get_contract_metadata endpoint.
     let mut features = Vec::new(env);
-    features.push_back(symbol_short!("calc"));
-    features.push_back(symbol_short!("audit"));
-    features.push_back(symbol_short!("pause"));
-    features.push_back(symbol_short!("stats"));
-    features.push_back(symbol_short!("history"));
-    features.push_back(symbol_short!("failcode"));
-    features.push_back(symbol_short!("safe_call"));
-    features.push_back(symbol_short!("ver_nego"));
-    features.push_back(symbol_short!("corr_id"));
-    features.push_back(symbol_short!("freeze"));
-    features.push_back(symbol_short!("ctrctinfo"));
+    for f in CONTRACT_FEATURES.iter() {
+        features.push_back(Symbol::new(env, f));
+    }
 
     Ok(ContractInfo {
         schema_version: CONTRACT_INFO_SCHEMA_VERSION,
         contract_name: symbol_short!("sla_calc"),
-        contract_version: symbol_short!("0_1_0"),
+        // #423 – derived from CARGO_PKG_VERSION, not a hand-maintained literal.
+        contract_version: cargo_pkg_version_symbol(env),
         storage_version: STORAGE_VERSION,
         result_schema_version: RESULT_SCHEMA_VERSION,
         event_version: crate::event_schema::current_event_version(),
@@ -151,13 +193,36 @@ mod tests {
             let info = get_contract_info(&env).expect("ContractInfo must be available after init");
             assert_eq!(info.schema_version, CONTRACT_INFO_SCHEMA_VERSION);
             assert_eq!(info.contract_name, symbol_short!("sla_calc"));
-            assert_eq!(info.contract_version, symbol_short!("0_1_0"));
+            assert_eq!(info.contract_version, cargo_pkg_version_symbol(&env));
             assert_eq!(info.storage_version, STORAGE_VERSION);
             assert_eq!(info.result_schema_version, RESULT_SCHEMA_VERSION);
             assert_eq!(info.event_version, symbol_short!("v1"));
             assert!(!info.needs_migration);
             assert!(!info.is_paused);
             assert!(!info.is_config_frozen);
+        });
+    }
+
+    #[test]
+    fn test_contract_version_is_derived_from_cargo_package() {
+        // #423 – the reported contract_version must be derived from the Cargo
+        // package version (dots → underscores), so it can never silently drift
+        // on a release bump.
+        let (env, contract_id, _admin, _operator) = setup();
+        env.as_contract(&contract_id, || {
+            let info = get_contract_info(&env).unwrap();
+
+            // Build the expected Symbol explicitly from CARGO_PKG_VERSION.
+            let dotted = env!("CARGO_PKG_VERSION").replace('.', "_");
+            let expected_symbol = Symbol::new(&env, &dotted);
+
+            assert_eq!(info.contract_version, expected_symbol);
+            // The derived symbol is stable across calls.
+            assert_eq!(info.contract_version, cargo_pkg_version_symbol(&env));
+            // And it differs from the dotted literal forever, so parity with
+            // the package version is enforced (a bump changes this symbol).
+            assert_eq!(info.contract_version, expected_symbol,
+                "contract_version must stay in lockstep with CARGO_PKG_VERSION");
         });
     }
 

@@ -39,6 +39,7 @@ pub mod config_metadata;
 pub mod contract_info;
 pub mod coordination_harness;
 pub mod cross_contract_safety;
+pub mod deployment_policy;
 pub mod error_responses;
 pub mod event;
 pub mod event_correlation;
@@ -52,6 +53,9 @@ pub mod history;
 pub mod history_snapshot;
 pub mod metadata;
 pub mod metrics;
+/// #422 – event payload-optimization helpers (consumer-side validation).
+pub mod payload_optimizer;
+pub mod policy;
 /// Parity checker: compares current `compute_result` against the locked-in
 /// canonical golden vectors in `test_snapshots/tests/parity_baseline.json`.
 /// Run with `cargo test --lib parity_tests::` or `just parity-check`.
@@ -74,7 +78,28 @@ pub mod storage_version;
 /// `ts/fixtures/contract-read-semantics.json`.
 #[cfg(test)]
 mod ts_parity_fixtures;
+/// #422 – formerly-orphan test-only modules, now declared so their guarantees
+/// (threshold boundaries, auth matrix, event ordering/stability, payload
+/// versioning, outage-id, pruning performance) are actually compiled and run.
+#[cfg(test)]
+mod auth_matrix_tests;
+#[cfg(test)]
+mod event_ordering_tests;
+#[cfg(test)]
+mod event_state_tests;
+#[cfg(test)]
+mod outage_id_tests;
+#[cfg(test)]
+mod payload_versioning_tests;
+#[cfg(test)]
+mod pruning_perf;
+#[cfg(test)]
+mod threshold_config;
+#[cfg(test)]
+mod topic_stability_tests;
 pub mod version_negotiation;
+#[cfg(test)]
+mod orphan_lint_tests;
 
 use crate::audit_state::AuditState;
 use crate::config_bundle::ConfigBundle;
@@ -783,7 +808,12 @@ pub struct PublicApiMethod {
     pub name: Symbol,
     /// Whether the method mutates storage (`true`) or is read-only (`false`).
     pub mutates: bool,
-    /// Auth role required: "admin", "operator", or "none".
+    /// Auth classification. Values:
+    /// - `"admin"` – caller must hold the admin role.
+    /// - `"operator"` – caller must hold the operator role.
+    /// - `"multi"` – two or more parties must authorize (e.g. `initialize`
+    ///   requires BOTH admin and operator signatures) (#425).
+    /// - `"none"` – no authorization gate (read-only / public).
     pub auth: Symbol,
     /// The primary event name emitted by this method, or `Symbol::new(env, "")` if none.
     pub event: Symbol,
@@ -1973,17 +2003,12 @@ impl SLACalculatorContract {
         Self::check_version(&env)?;
         let severities = Self::canonical_severities(&env);
 
+        // #424 – feature list derived from the single shared source so this
+        // legacy endpoint can never disagree with get_contract_info.
         let mut features = Vec::new(&env);
-        features.push_back(symbol_short!("calc"));
-        features.push_back(symbol_short!("audit"));
-        features.push_back(symbol_short!("pause"));
-        features.push_back(symbol_short!("stats"));
-        features.push_back(symbol_short!("history"));
-        features.push_back(symbol_short!("failcode"));
-        features.push_back(symbol_short!("safe_call"));
-        features.push_back(symbol_short!("ver_nego"));
-        features.push_back(symbol_short!("corr_id"));
-        features.push_back(symbol_short!("freeze"));
+        for f in crate::contract_info::CONTRACT_FEATURES.iter() {
+            features.push_back(Symbol::new(&env, f));
+        }
 
         Ok(ContractMetadata {
             contract_name: symbol_short!("sla_calc"),
@@ -2036,7 +2061,8 @@ impl SLACalculatorContract {
     /// Each `PublicApiMethod` contains:
     /// - `name`: the contract method name (e.g. "calculate_sla")
     /// - `mutates`: `true` if the method modifies storage
-    /// - `auth`: auth role required — "admin", "operator", or "none"
+    /// - `auth`: auth classification — `"admin"`, `"operator"`, `"multi"`
+    ///   (multiple parties, e.g. `initialize`), or `"none"`.
     /// - `event`: the primary event name emitted, or empty if none
     ///
     /// # Errors
@@ -2124,7 +2150,10 @@ impl SLACalculatorContract {
         // Health:
         methods.push_back(method("healthcheck", false, "none", ""));
         // Init:
-        methods.push_back(method("initialize", true, "admin", ""));
+        // initialize requires BOTH the admin and the operator address to
+        // authorize (admin.require_auth(); operator.require_auth();) — not
+        // single-party "admin" (#425).
+        methods.push_back(method("initialize", true, "multi", ""));
         methods.push_back(method("is_config_frozen", false, "none", ""));
         methods.push_back(method("is_paused", false, "none", ""));
         // Config queries:
