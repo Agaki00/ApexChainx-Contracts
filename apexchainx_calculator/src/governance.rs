@@ -1,9 +1,10 @@
-//! Two-step admin and operator transfer governance.
-//!
+//! Two-step admin and operator transfer governance.//! 
 //! This module implements the two-step handoff pattern for admin and operator
 //! role transfers, plus admin renounce and single-step operator assignment.
 //! All functions require the appropriate role authorization and emit versioned
-//! governance events for backend audit trails.
+//! governance events for backend audit trails. Re-proposing a role while a
+//! proposal is pending replaces the candidate and emits a supersession event
+//! (`adm_sup`/`op_sup`) so the pending-slot history stays reconstructable.
 //!
 //! # Operator Transfer Paths
 //!
@@ -34,13 +35,43 @@
 //! two-step (consent obtained).
 //!
 //! Both paths are gated by `require_not_frozen()` and the admin role check.
+//!
+//! # Operator Transfer Paths
+//!
+//! There are two distinct ways to change the operator role:
+//!
+//! ## Two-step (canonical, preferred)
+//!
+//! 1. Admin calls `propose_operator` → emits `op_prop` event, stores pending operator.
+//! 2. Proposed new operator calls `accept_operator` → emits `op_acc` event, operator is set.
+//!
+//! This is the **recommended** path because it requires the new operator's explicit
+//! consent (`accept_operator` demands `require_auth()` from the proposed address).
+//! The event trail (`op_prop` → `op_acc`) provides a clear audit sequence that
+//! backend consumers can follow.
+//!
+//! ## Single-step (legacy break-glass)
+//!
+//! Admin calls `set_operator` → emits `op_set` event, operator is set immediately.
+//!
+//! This path does **not** require the new operator's consent or signature. It was
+//! introduced in the #28-era before the two-step handoff (#64) existed and is
+//! retained as a break-glass mechanism for emergency operator replacement.
+//!
+//! **Security note:** Because `set_operator` bypasses new-operator consent, a
+//! compromised admin could install an operator silently. Consumers that need to
+//! distinguish consented from non-consented operator changes must check the
+//! event name: `op_set` = single-step (no consent), `op_prop`+`op_acc` =
+//! two-step (consent obtained).
+//!
 
 use soroban_sdk::{Address, Env, Symbol};
 
 use crate::{
-    SLAError, ADMIN_KEY, EVENT_ADMIN_ACC, EVENT_ADMIN_CAN, EVENT_ADMIN_PROP, EVENT_ADMIN_REN, EVENT_OP_ACC,
-    EVENT_OP_CAN, EVENT_OP_PROP, EVENT_OP_SET, EVENT_VERSION, OPERATOR_KEY, PENDING_ADMIN_KEY,
-    PENDING_ADMIN_TS_KEY, PENDING_OP_KEY, PENDING_OP_TS_KEY,
+    SLAError, ADMIN_KEY, EVENT_ADMIN_ACC, EVENT_ADMIN_CAN, EVENT_ADMIN_PROP, EVENT_ADMIN_REN,
+    EVENT_ADMIN_SUP, EVENT_OP_ACC, EVENT_OP_CAN, EVENT_OP_PROP, EVENT_OP_SET, EVENT_OP_SUP,
+    EVENT_VERSION, OPERATOR_KEY, PENDING_ADMIN_KEY, PENDING_ADMIN_TS_KEY, PENDING_OP_KEY,
+    PENDING_OP_TS_KEY,
 };
 
 /// Window (in ledger seconds) after which a pending proposal expires.
@@ -66,10 +97,20 @@ pub fn propose_admin(env: &Env, caller: &Address, new_admin: &Address) -> Result
     crate::SLACalculatorContract::check_version(env)?;
     crate::config_freeze::require_not_frozen(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
+    let superseded: Option<Address> = env.storage().instance().get(&PENDING_ADMIN_KEY);
     env.storage().instance().set(&PENDING_ADMIN_KEY, new_admin);
     env.storage()
         .instance()
         .set(&PENDING_ADMIN_TS_KEY, &env.ledger().timestamp());
+    if let Some(previous) = superseded {
+        // A re-proposal supersedes the pending candidate. Publish the
+        // supersession first so the event stream records the replacement
+        // before the new proposal, letting consumers reconstruct the slot.
+        env.events().publish(
+            (EVENT_ADMIN_SUP, EVENT_VERSION, caller.clone()),
+            (previous, new_admin.clone()),
+        );
+    }
     env.events().publish(
         (EVENT_ADMIN_PROP, EVENT_VERSION, caller.clone()),
         (new_admin.clone(),),
@@ -134,10 +175,17 @@ pub fn propose_operator(env: &Env, caller: &Address, new_operator: &Address) -> 
     crate::SLACalculatorContract::check_version(env)?;
     crate::config_freeze::require_not_frozen(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
+    let superseded: Option<Address> = env.storage().instance().get(&PENDING_OP_KEY);
     env.storage().instance().set(&PENDING_OP_KEY, new_operator);
     env.storage()
         .instance()
         .set(&PENDING_OP_TS_KEY, &env.ledger().timestamp());
+    if let Some(previous) = superseded {
+        env.events().publish(
+            (EVENT_OP_SUP, EVENT_VERSION, caller.clone()),
+            (previous, new_operator.clone()),
+        );
+    }
     env.events().publish(
         (EVENT_OP_PROP, EVENT_VERSION, caller.clone()),
         (new_operator.clone(),),

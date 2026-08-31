@@ -4944,6 +4944,7 @@ fn test_multiple_replacement_cycles_end_state_is_correct() {
 // ============================================================
 // #470 – renounce_admin invalidates a pending operator proposal
 // #469 – set_operator invalidates a pending operator proposal
+// #468 – Proposal supersession events
 // ============================================================
 
 /// Returns how many events named `name` the contract has emitted so far.
@@ -5029,6 +5030,76 @@ fn test_superseded_operator_cannot_accept_after_direct_set() {
 
     // Stale pending candidate tries to accept — must panic.
     client.accept_operator(&pending_op);
+}
+
+#[test]
+fn test_admin_reproposal_emits_supersession_event() {
+    // Re-proposing an admin must emit an `adm_sup` supersession event and
+    // record the replacement so an auditor can reconstruct the pending slot.
+    let (env, client, actors) = setup();
+    let admin_a = soroban_sdk::Address::generate(&env);
+    let admin_b = soroban_sdk::Address::generate(&env);
+
+    client.propose_admin(&actors.admin, &admin_a);
+    assert_eq!(count_named_event(&env, &client, "adm_sup"), 0);
+
+    // First re-proposal supersedes admin_a.
+    client.propose_admin(&actors.admin, &admin_b);
+    assert_eq!(client.get_pending_admin(), Some(admin_b.clone()));
+    assert_eq!(count_named_event(&env, &client, "adm_sup"), 1);
+
+    // A further re-proposal supersedes admin_b in turn.
+    let admin_c = soroban_sdk::Address::generate(&env);
+    client.propose_admin(&actors.admin, &admin_c);
+    assert_eq!(client.get_pending_admin(), Some(admin_c.clone()));
+    assert_eq!(count_named_event(&env, &client, "adm_sup"), 2);
+}
+
+#[test]
+fn test_operator_reproposal_emits_supersession_event() {
+    // Re-proposing an operator must emit an `op_sup` supersession event.
+    let (env, client, actors) = setup();
+    let op_a = soroban_sdk::Address::generate(&env);
+    let op_b = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &op_a);
+    assert_eq!(count_named_event(&env, &client, "op_sup"), 0);
+
+    client.propose_operator(&actors.admin, &op_b);
+    assert_eq!(client.get_pending_operator(), Some(op_b.clone()));
+    assert_eq!(count_named_event(&env, &client, "op_sup"), 1);
+}
+
+#[test]
+fn test_admin_supersession_payload_carries_both_candidates() {
+    // The `adm_sup` event payload must name both the superseded and the new
+    // admin so the pending-slot history is fully reconstructable.
+    let (env, client, actors) = setup();
+    let admin_a = soroban_sdk::Address::generate(&env);
+    let admin_b = soroban_sdk::Address::generate(&env);
+
+    client.propose_admin(&actors.admin, &admin_a);
+    client.propose_admin(&actors.admin, &admin_b);
+
+    let events = env.events().all();
+    let mut found = false;
+    for i in 0..events.len() {
+        let (contract_id, topics, payload) = events.get(i).unwrap();
+        if contract_id != client.address {
+            continue;
+        }
+        if topics.len() >= 1 {
+            let topic0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+            if topic0 == symbol(&env, "adm_sup") {
+                let (previous, replacement): (soroban_sdk::Address, soroban_sdk::Address) =
+                    payload.try_into_val(&env).unwrap();
+                assert_eq!(previous, admin_a);
+                assert_eq!(replacement, admin_b);
+                found = true;
+            }
+        }
+    }
+    assert!(found, "adm_sup event not found");
 }
 
 // ============================================================

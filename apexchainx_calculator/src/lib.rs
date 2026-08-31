@@ -321,6 +321,9 @@ pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
 // adm_ren   → ()
 //   context: caller Address
 //
+// adm_sup   → (superseded_admin: Address, new_admin: Address)
+//   context: caller Address
+//
 // op_prop   → (new_operator: Address,)
 //   context: caller Address
 //
@@ -328,6 +331,9 @@ pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
 //   context: caller Address
 //
 // op_can    → ()
+//   context: caller Address
+//
+// op_sup    → (superseded_operator: Address, new_operator: Address)
 //   context: caller Address
 //
 // set_int   → (outage_id: Symbol, status: Symbol, payment_type: Symbol,
@@ -426,6 +432,13 @@ pub(crate) const EVENT_ADMIN_ACC: Symbol = symbol_short!("adm_acc");
 /// EVENT_ADMIN_ACC.
 pub(crate) const EVENT_ADMIN_CAN: Symbol = symbol_short!("adm_can");
 
+/// Emitted when a pending admin proposal is superseded by a re-proposal
+/// before the prior candidate accepted or cancelled. (#468)
+///
+/// Compatibility decision: payload is `(superseded_admin: Address,
+/// new_admin: Address)`. Additive event name; appending fields is safe.
+pub(crate) const EVENT_ADMIN_SUP: Symbol = symbol_short!("adm_sup");
+
 /// Emitted when the admin permanently renounces their role. (#65)
 ///
 /// Compatibility decision: payload is intentionally empty `()`. Renounce is
@@ -449,6 +462,13 @@ pub(crate) const EVENT_OP_ACC: Symbol = symbol_short!("op_acc");
 /// Compatibility decision: payload is intentionally empty `()`. Same rules as
 /// EVENT_ADMIN_CAN.
 pub(crate) const EVENT_OP_CAN: Symbol = symbol_short!("op_can");
+
+/// Emitted when a pending operator proposal is superseded by a re-proposal
+/// before the prior candidate accepted or cancelled. (#468)
+///
+/// Compatibility decision: payload is `(superseded_operator: Address,
+/// new_operator: Address)`. Additive event name; appending fields is safe.
+pub(crate) const EVENT_OP_SUP: Symbol = symbol_short!("op_sup");
 
 /// Emitted when the configuration is frozen by admin.
 ///
