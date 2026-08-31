@@ -55,8 +55,13 @@
 //! - payload:  (false,)
 //!
 //! ## op_set (`op_set`)
-//! Emitted on operator change.
-//! - topic[2]: caller Address
+//! Emitted when the operator is set directly by the admin (single-step legacy path).
+//! Unlike the two-step path (`op_prop` → `op_acc`), this event indicates the new
+//! operator did **not** consent to the role change — `set_operator` only requires
+//! the admin's authorization. Consumers that need to distinguish consented from
+//! non-consented operator changes should check for this event name vs. the
+//! `op_prop`+`op_acc` pair.
+//! - topic[2]: caller Address (admin who performed the set)
 //! - payload:  (new_operator: Address,)
 //!
 //! ## pruned (`pruned`)

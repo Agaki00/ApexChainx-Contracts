@@ -1416,8 +1416,13 @@ impl SLACalculatorContract {
     // #28 – Operator management (admin only)
     // -------------------------------------------------------------------
 
-    /// Replace the operator address (admin only).
-    /// Emits an `op_set` event.
+    /// Replace the operator address directly (single-step, admin only).
+    ///
+    /// This is the legacy break-glass path. It does **not** require the new
+    /// operator's consent — only the admin authorizes the change. Emits an
+    /// `op_set` event (distinguishable from the two-step `op_prop`/`op_acc`
+    /// trail). For routine rotations, prefer `propose_operator` +
+    /// `accept_operator`.
     pub fn set_operator(env: Env, caller: Address, new_operator: Address) -> Result<(), SLAError> {
         governance::set_operator(&env, &caller, &new_operator)
     }
@@ -1463,12 +1468,16 @@ impl SLACalculatorContract {
     // #64 – Two-step operator handoff
     // -------------------------------------------------------------------
 
-    /// Propose a new operator. The current admin initiates; the new operator must call `accept_operator`.
+    /// Propose a new operator (step 1 of the canonical two-step handoff).
+    /// The current admin initiates; the new operator must call `accept_operator`
+    /// to consent and complete the transfer. Emits `op_prop`.
     pub fn propose_operator(env: Env, caller: Address, new_operator: Address) -> Result<(), SLAError> {
         governance::propose_operator(&env, &caller, &new_operator)
     }
 
-    /// Accept a pending operator handoff. Must be called by the proposed new operator.
+    /// Accept a pending operator handoff (step 2 of the canonical two-step handoff).
+    /// Must be called by the proposed new operator, requiring their explicit consent.
+    /// Emits `op_acc`.
     pub fn accept_operator(env: Env, caller: Address) -> Result<(), SLAError> {
         governance::accept_operator(&env, &caller)
     }

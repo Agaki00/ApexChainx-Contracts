@@ -4,6 +4,36 @@
 //! role transfers, plus admin renounce and single-step operator assignment.
 //! All functions require the appropriate role authorization and emit versioned
 //! governance events for backend audit trails.
+//!
+//! # Operator Transfer Paths
+//!
+//! There are two distinct ways to change the operator role:
+//!
+//! ## Two-step (canonical, preferred)
+//!
+//! 1. Admin calls `propose_operator` → emits `op_prop` event, stores pending operator.
+//! 2. Proposed new operator calls `accept_operator` → emits `op_acc` event, operator is set.
+//!
+//! This is the **recommended** path because it requires the new operator's explicit
+//! consent (`accept_operator` demands `require_auth()` from the proposed address).
+//! The event trail (`op_prop` → `op_acc`) provides a clear audit sequence that
+//! backend consumers can follow.
+//!
+//! ## Single-step (legacy break-glass)
+//!
+//! Admin calls `set_operator` → emits `op_set` event, operator is set immediately.
+//!
+//! This path does **not** require the new operator's consent or signature. It was
+//! introduced in the #28-era before the two-step handoff (#64) existed and is
+//! retained as a break-glass mechanism for emergency operator replacement.
+//!
+//! **Security note:** Because `set_operator` bypasses new-operator consent, a
+//! compromised admin could install an operator silently. Consumers that need to
+//! distinguish consented from non-consented operator changes must check the
+//! event name: `op_set` = single-step (no consent), `op_prop`+`op_acc` =
+//! two-step (consent obtained).
+//!
+//! Both paths are gated by `require_not_frozen()` and the admin role check.
 
 use soroban_sdk::{Address, Env, Symbol};
 
@@ -92,6 +122,14 @@ pub fn get_pending_admin(env: &Env) -> Result<Option<Address>, SLAError> {
 
 /// Proposes a new operator. The current admin initiates; the new operator
 /// must call `accept_operator` to complete the handoff.
+///
+/// This is step 1 of the canonical two-step operator transfer. The proposed
+/// operator must call `accept_operator` (requiring their explicit consent via
+/// `require_auth()`) before the transfer completes. This ensures the new
+/// operator agrees to assume the role.
+///
+/// Emits an `op_prop` event carrying `(new_operator,)` in the payload.
+/// If a previous proposal exists, it is silently overwritten.
 pub fn propose_operator(env: &Env, caller: &Address, new_operator: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::config_freeze::require_not_frozen(env)?;
@@ -108,6 +146,14 @@ pub fn propose_operator(env: &Env, caller: &Address, new_operator: &Address) -> 
 }
 
 /// Accepts a pending operator handoff. Must be called by the proposed new operator.
+///
+/// This is step 2 of the canonical two-step operator transfer. It requires
+/// the caller to be the pending operator (verified by `require_auth()` +
+/// address match), ensuring the new operator explicitly consents to the role.
+///
+/// On success, the operator is set, the pending proposal is cleared, and an
+/// `op_acc` event is emitted. Consumers see a `op_prop` → `op_acc` pair in
+/// the event stream, confirming a consented handoff.
 pub fn accept_operator(env: &Env, caller: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::config_freeze::require_not_frozen(env)?;
@@ -173,6 +219,49 @@ pub fn renounce_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
 }
 
 /// Replaces the operator address directly (single-step, admin only).
+///
+/// # Single-step operator assignment (legacy break-glass path)
+///
+/// This function replaces the operator **immediately** without requiring the
+/// new operator's consent. It is a legacy path retained from the #28 era,
+/// before the two-step `propose_operator`/`accept_operator` handoff (#64)
+/// was introduced.
+///
+/// ## Consent semantics
+///
+/// Unlike the two-step path (`op_prop` → `op_acc`), this function does **not**
+/// call `require_auth()` on the new operator address. The new operator never
+/// explicitly consents to the role change. The admin's authorization is the
+/// only consent required.
+///
+/// ## Event trail
+///
+/// Emits a single `op_set` event carrying `(new_operator,)` in the payload.
+/// This differs from the two-step path which emits `op_prop` on proposal and
+/// `op_acc` on acceptance. Backend consumers can distinguish the two paths by
+/// the event name: `op_set` = non-consented direct set, `op_prop`+`op_acc` =
+/// consented handoff.
+///
+/// ## Intended use
+///
+/// Use `set_operator` as a **break-glass** mechanism when the two-step flow is
+/// impractical (e.g., the current operator's key is compromised and the new
+/// operator cannot be reached for `accept_operator`). For routine operator
+/// rotations, prefer the two-step path.
+///
+/// ## Pending-slot interaction
+///
+/// This function does **not** clear or interact with any pending operator
+/// proposal (`PENDING_OP_KEY`). If a two-step proposal is pending when
+/// `set_operator` is called, the pending proposal remains in storage and
+/// can still be accepted. Admins should explicitly cancel any pending
+/// proposal before using this path to avoid ambiguity.
+///
+/// ## Gating
+///
+/// - Requires admin role (`require_admin`).
+/// - Blocked when config is frozen (`require_not_frozen`).
+/// - Requires storage version match (`check_version`).
 pub fn set_operator(env: &Env, caller: &Address, new_operator: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::config_freeze::require_not_frozen(env)?;
