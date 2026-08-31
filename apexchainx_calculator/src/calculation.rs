@@ -359,7 +359,7 @@ fn set_count_lane(packed: u128, index: u32, value: u32) -> u128 {
 ///
 /// - **Lazy Reset Strategy**: Resets are non-blocking and lazy; counters are not automatically reset by background cron tasks.
 ///   Instead, reset is triggered on the next `calculate_sla` invocation for that specific severity lane once 7 days have passed.
-/// - **Lane Isolation**: Reset is per-severity lane. Calculations or inactivity in one severity level do not reset telemetry for other severities.
+/// - **Per-Counter Isolation**: Resets are per-counter within each severity lane. Inactivity in calculation or violation counters resets only its respective counter (e.g., a stale calculation counter reset will not wipe a fresh violation counter).
 /// - **Reinitialization**: Upon reset, the lane's calculation and violation counters are cleared to 0 before the current invocation is recorded,
 ///   reinitializing the count to 1 calculation (and 1 violation if the current calculation violated SLA).
 ///
@@ -380,8 +380,10 @@ pub fn record_severity_telemetry(env: &Env, severity: &Symbol, met: bool) {
     let last_violation = count_lane(last_violations, index) as u64;
     let calc_stale = last_calc != 0 && now.saturating_sub(last_calc) >= week_seconds;
     let violation_stale = last_violation != 0 && now.saturating_sub(last_violation) >= week_seconds;
-    if calc_stale || violation_stale {
+    if calc_stale {
         calculations = set_count_lane(calculations, index, 0);
+    }
+    if violation_stale {
         violations = set_count_lane(violations, index, 0);
     }
 
