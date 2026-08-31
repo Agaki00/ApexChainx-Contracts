@@ -50,7 +50,6 @@ mod event_schema;
 pub mod fuzz_spec;
 pub mod governance;
 pub mod history;
-pub mod history_snapshot;
 pub mod metadata;
 pub mod metrics;
 /// #422 – event payload-optimization helpers (consumer-side validation).
@@ -2210,6 +2209,12 @@ impl SLACalculatorContract {
     // -------------------------------------------------------------------
 
     /// Returns the cumulative SLA performance statistics.
+    ///
+    /// This is the contract's dashboard aggregate: together with
+    /// `get_severity_telemetry` (per-severity weekly windows) it is the
+    /// supported surface for dashboard telemetry. Cumulative totals here
+    /// subsume the windowed view; consumers that need a windowed summary
+    /// should read `get_severity_telemetry` rather than re-scan history.
     pub fn get_stats(env: Env) -> Result<SLAStats, SLAError> {
         Self::check_version(&env)?;
         env.storage()
