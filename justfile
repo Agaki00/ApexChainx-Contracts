@@ -141,6 +141,24 @@ fuzz-run target seconds="60":
 parity-check:
     cd {{crate}} && cargo test --lib parity_tests::
 
+# ------------------------------------------------------------ ts property tests ------
+
+# Run the TypeScript property/regression test suite in tests/.
+# These tests assert cross-language parity, simulation reproducibility,
+# and behavioral invariants that cargo test does not cover.
+ts-property-tests:
+    npx tsx --test tests/*.test.ts
+
+# ------------------------------------------------------------ offchain checks ------
+
+# Run offchain budget/regression checks (event size, read cost, governance, metadata).
+# Each script exits non-zero on assertion failure, so CI can gate on the recipe.
+offchain-checks:
+    npx tsx offchain/eventSizeRegression.ts
+    npx tsx offchain/readCostRegression.ts
+    npx tsx offchain/governanceConsistency.ts
+    npx tsx offchain/contractMetadata.ts
+
 # ------------------------------------------------------------ ts parity ------
 
 # Regenerate the contract-derived artefacts the ts/ helpers are checked against.

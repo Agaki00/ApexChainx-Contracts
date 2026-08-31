@@ -1518,6 +1518,10 @@ impl SLACalculatorContract {
         // so higher-severity penalties are never lower than lower-severity ones.
         Self::validate_cross_severity_penalty_ordering(&env, &severity, penalty_per_minute)?;
 
+        // Cross-severity threshold ordering: enforce that critical <= high <= medium <= low
+        // so that more severe outages always have shorter response windows.
+        Self::validate_cross_severity_threshold_ordering(&env, &severity, threshold_minutes)?;
+
         let mut configs: Map<Symbol, SLAConfig> = env
             .storage()
             .instance()
@@ -2777,6 +2781,59 @@ impl SLACalculatorContract {
             if let Some(higher_cfg) = configs.get(higher_sev.clone()) {
                 if new_penalty > higher_cfg.penalty_per_minute {
                     return Err(SLAError::InvalidPenalty);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Cross-severity threshold ordering validation.
+    ///
+    /// Ensures that more-severe tiers have shorter thresholds than less-severe
+    /// ones, preserving the documented progression:
+    ///   critical.threshold <= high.threshold <= medium.threshold <= low.threshold
+    ///
+    /// This prevents configurations where a low-severity outage would violate
+    /// faster than a critical-severity one (e.g. low threshold < critical threshold),
+    /// which would invert the severity model's meaning for operators.
+    ///
+    /// The check is symmetrical to `validate_cross_severity_penalty_ordering`:
+    /// it compares the new threshold against adjacent canonical severities.
+    pub(crate) fn validate_cross_severity_threshold_ordering(
+        env: &Env,
+        updated_severity: &Symbol,
+        new_threshold: u32,
+    ) -> Result<(), SLAError> {
+        let configs: Map<Symbol, SLAConfig> = env
+            .storage()
+            .instance()
+            .get(&CONFIG_KEY)
+            .ok_or(SLAError::NotInitialized)?;
+
+        let index = Self::canonical_severity_index(updated_severity).ok_or(SLAError::InvalidSeverity)?;
+        let severities = Self::canonical_severities(env);
+
+        // Check against the next-lower severity (if any):
+        //   this severity's threshold <= next-lower severity's threshold
+        // (critical <= high <= medium <= low)
+        if index + 1 < severities.len() {
+            let lower_sev = severities.get(index + 1).ok_or(SLAError::InvalidSeverity)?;
+            if let Some(lower_cfg) = configs.get(lower_sev.clone()) {
+                if new_threshold > lower_cfg.threshold_minutes {
+                    return Err(SLAError::InvalidThreshold);
+                }
+            }
+        }
+
+        // Check against the next-higher severity (if any):
+        //   this severity's threshold >= next-higher severity's threshold
+        // Only enforced for high, medium, low (index 1..=3).
+        if (1..=3).contains(&index) {
+            let higher_sev = severities.get(index - 1).ok_or(SLAError::InvalidSeverity)?;
+            if let Some(higher_cfg) = configs.get(higher_sev.clone()) {
+                if new_threshold < higher_cfg.threshold_minutes {
+                    return Err(SLAError::InvalidThreshold);
                 }
             }
         }

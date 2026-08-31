@@ -116,6 +116,9 @@ mod tests {
         // Apply a valid config update and verify the bundle picks it up.
         // Values stay inside the per-severity bounds enforced by
         // `validate_config`: critical allows threshold≤60 and penalty≥50.
+        // Set high first so cross-severity threshold ordering is satisfied
+        // when critical is updated to threshold=42 (high must be >= critical).
+        client.set_config(&admin, &symbol_short!("high"), &42, &50, &750);
         client.set_config(&admin, &symbol_short!("critical"), &42, &111, &999);
 
         let bundle = client
