@@ -31,7 +31,8 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        SLACalculatorContract, SLACalculatorContractClient, RESULT_SCHEMA_FIELD_COUNT, RESULT_SCHEMA_VERSION,
+        SLACalculatorContract, SLACalculatorContractClient, CONFIG_SNAPSHOT_SCHEMA_FIELD_COUNT,
+        CONFIG_SNAPSHOT_SCHEMA_VERSION, RESULT_SCHEMA_FIELD_COUNT, RESULT_SCHEMA_VERSION,
     };
     use soroban_sdk::{testutils::Address as _, Env, Symbol};
 
@@ -215,5 +216,33 @@ mod tests {
         } else {
             panic!("get_config_bundle returned None after initialization");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // SLAConfigSnapshot sentinel: field count must match CONFIG_SNAPSHOT_SCHEMA_FIELD_COUNT
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_config_snapshot_schema_field_count_sentinel() {
+        use crate::SLAConfigSnapshot;
+        use soroban_sdk::{symbol_short, Env, Vec};
+
+        let env = Env::default();
+        let sample = SLAConfigSnapshot {
+            version: CONFIG_SNAPSHOT_SCHEMA_VERSION,
+            entries: Vec::new(&env),
+        };
+
+        let SLAConfigSnapshot {
+            version: _,
+            entries: _,
+        } = sample;
+
+        assert_eq!(
+            CONFIG_SNAPSHOT_SCHEMA_FIELD_COUNT, 2,
+            "CONFIG_SNAPSHOT_SCHEMA_FIELD_COUNT is out of sync with SLAConfigSnapshot. \
+             Update lib.rs::CONFIG_SNAPSHOT_SCHEMA_FIELD_COUNT and \
+             CONFIG_SNAPSHOT_SCHEMA_VERSION when adding or removing fields."
+        );
     }
 }
