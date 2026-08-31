@@ -9431,7 +9431,9 @@ fn test_227_all_error_codes_are_classified() {
 
     // The enum has 19 variants (codes 1..19). Verify every one is
     // covered by our classification table.
-    let expected_codes: [u32; 22] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
+    let expected_codes: [u32; 22] = [
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+    ];
 
     for code in &expected_codes {
         // Classification must not panic — every code is handled.
