@@ -8,7 +8,8 @@ use soroban_sdk::{symbol_short, Env, Map, Symbol, Vec};
 
 use crate::{
     config_freeze, config_metadata, SLAConfig, SLAConfigEntry, SLAConfigSnapshot, SLAError, CONFIG_KEY,
-    CONFIG_SNAPSHOT_SCHEMA_VERSION, CUSTOM_CONFIG_KEY, EVENT_CONFIG_UPD, EVENT_VERSION,
+    CONFIG_SNAPSHOT_SCHEMA_VERSION, CUSTOM_CONFIG_KEY, EVENT_CONFIG_REM, EVENT_CONFIG_UPD,
+    EVENT_SEV_ADD, EVENT_SEV_UPD, EVENT_VERSION,
 };
 
 /// Sets the SLA configuration for a given severity level.
@@ -146,10 +147,15 @@ pub fn get_last_config_update(env: &Env) -> Result<Option<crate::ConfigUpdateInf
 /// Registers or updates a custom (non-canonical) severity level.
 ///
 /// # Overwrite & Lifecycle Behavior
-/// - If a custom severity with the given symbol is not registered, it is added to `CUSTCFG`.
-/// - If a custom severity with the given symbol already exists, calling `set_custom_severity`
-///   overwrites the existing parameters (`threshold_minutes`, `penalty_per_minute`, `reward_base`) in-place.
-/// - In both cases, a `cfg_upd` (`EVENT_CONFIG_UPD`) event is emitted with the severity symbol and parameters.
+/// - If a custom severity with the given symbol is not registered, a `sev_add`
+///   (`EVENT_SEV_ADD`) event is emitted — indexers can reconstruct the
+///   registered set from these creation events alone.
+/// - If a custom severity with the given symbol already exists, a `sev_upd`
+///   (`EVENT_SEV_UPD`) event is emitted — indexers can tell reconfiguration
+///   from first registration by the distinct event name.
+/// - The payload shape is identical in both cases `(threshold_minutes,
+///   penalty_per_minute, reward_base)` so consumers that only care about
+///   values can parse either event.
 pub fn set_custom_severity(
     env: &Env,
     severity: Symbol,
@@ -176,6 +182,10 @@ pub fn set_custom_severity(
         .get(&CUSTOM_CONFIG_KEY)
         .unwrap_or_else(|| Map::new(env));
 
+    // #456 – Determine lifecycle transition before writing so the emitted
+    // event distinguishes creation from reconfiguration.
+    let is_update = custom.contains_key(severity.clone());
+
     custom.set(
         severity.clone(),
         SLAConfig {
@@ -186,8 +196,13 @@ pub fn set_custom_severity(
     );
     env.storage().instance().set(&CUSTOM_CONFIG_KEY, &custom);
 
+    let event_name = if is_update {
+        EVENT_SEV_UPD
+    } else {
+        EVENT_SEV_ADD
+    };
     env.events().publish(
-        (EVENT_CONFIG_UPD, EVENT_VERSION, severity),
+        (event_name, EVENT_VERSION, severity),
         (threshold_minutes, penalty_per_minute, reward_base),
     );
     Ok(())
@@ -212,7 +227,7 @@ pub fn remove_custom_severity(env: &Env, severity: Symbol) -> Result<(), SLAErro
     env.storage().instance().set(&CUSTOM_CONFIG_KEY, &custom);
 
     env.events()
-        .publish((EVENT_CONFIG_UPD, EVENT_VERSION, severity), (0u32, 0i128, 0i128));
+        .publish((EVENT_CONFIG_REM, EVENT_VERSION, severity), ());
     Ok(())
 }
 

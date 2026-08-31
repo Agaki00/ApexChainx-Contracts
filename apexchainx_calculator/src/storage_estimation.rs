@@ -172,12 +172,22 @@ pub fn get_storage_footprint_estimate(env: &Env) -> Result<u64, SLAError> {
     Ok(footprint)
 }
 
-/// Calculates the estimated rent cost (in stroops / smallest units) per ledger
-/// based on current storage footprint byte size.
+/// Calculates an **approximate** per-ledger storage rent cost (in stroops)
+/// based on the current storage footprint.
+///
+/// **Disclaimer (#459):** This is a relative growth proxy, not an
+/// authoritative rent figure. The formula (`footprint / 10 + 1`) is a
+/// placeholder approximation. Actual Stellar rent depends on network
+/// parameters (rent fee per byte per ledger, minimum rent, etc.) that
+/// are not available to the Soroban host in this SDK version.
+///
+/// Operators should use this value to track **relative** storage cost
+/// growth over time, not as an absolute budgeting number.
 pub fn get_rent_estimate(env: &Env) -> Result<i128, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     let footprint = get_storage_footprint_estimate(env)? as i128;
-    // Formula: ~1 stroop per 10 bytes per ledger + 1 base stroop
+    // Relative proxy: ~1 stroop per 10 bytes per ledger + 1 base stroop.
+    // See doc comment — this is not derived from network parameters.
     let rent_per_ledger = (footprint / 10) + 1;
     Ok(rent_per_ledger)
 }
