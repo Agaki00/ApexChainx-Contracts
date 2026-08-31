@@ -2281,7 +2281,7 @@ fn test_set_operator_emits_only_op_set_event() {
     let mut op_acc_count = 0u32;
     for i in 0..events.len() {
         let (_, topics, _) = events.get(i).unwrap();
-        if topics.len() >= 1 {
+        if !topics.is_empty() {
             let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
             if name == EVENT_OP_SET {
                 op_set_count += 1;
@@ -2315,7 +2315,7 @@ fn test_two_step_operator_emits_op_prop_and_op_acc() {
     let mut op_acc_count = 0u32;
     for i in 0..events.len() {
         let (_, topics, _) = events.get(i).unwrap();
-        if topics.len() >= 1 {
+        if !topics.is_empty() {
             let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
             if name == EVENT_OP_SET {
                 op_set_count += 1;
@@ -2443,7 +2443,7 @@ fn test_set_operator_after_propose_does_not_invalidate_proposal() {
     let mut op_acc_count = 0u32;
     for i in 0..events.len() {
         let (_, topics, _) = events.get(i).unwrap();
-        if topics.len() >= 1 {
+        if !topics.is_empty() {
             let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
             if name == EVENT_OP_PROP {
                 op_prop_count += 1;
