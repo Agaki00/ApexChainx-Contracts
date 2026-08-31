@@ -266,6 +266,14 @@ pub fn set_operator(env: &Env, caller: &Address, new_operator: &Address) -> Resu
     crate::SLACalculatorContract::check_version(env)?;
     crate::config_freeze::require_not_frozen(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
+    if env.storage().instance().has(&PENDING_OP_KEY) {
+        // A direct assignment invalidates any pending operator proposal so a
+        // stale handoff can never override the admin's single-step decision.
+        env.storage().instance().remove(&PENDING_OP_KEY);
+        env.storage().instance().remove(&PENDING_OP_TS_KEY);
+        env.events()
+            .publish((EVENT_OP_CAN, EVENT_VERSION, caller.clone()), ());
+    }
     env.storage().instance().set(&OPERATOR_KEY, new_operator);
     env.events().publish(
         (EVENT_OP_SET, EVENT_VERSION, caller.clone()),
