@@ -42,15 +42,17 @@ jobs:
           
           echo "✅ WASM build completed in ${BUILD_DURATION} seconds"
           
-          # Log final artifact info for verification
-          WASM=target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
+          # Log final artifact info for verification.
+          # Workspace build — artifacts land in the ROOT target/, so from the
+          # member dir the path is ../target/.
+          WASM=../target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
           if [ -f "$WASM" ]; then
             echo "📦 Final WASM size: $(wc -c < "$WASM") bytes"
           fi
 
       - name: Generate SHA-256 manifest
         run: |
-          WASM=apexchainx_calculator/target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
+          WASM=target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
           sha256sum "$WASM" | awk '{print $1 "  apexchainx_calculator.wasm"}' > manifest.sha256
           echo "=== manifest.sha256 ==="
           cat manifest.sha256
@@ -59,7 +61,7 @@ jobs:
 
       - name: Verify manifest self-consistency
         run: |
-          cp apexchainx_calculator/target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm .
+          cp target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm .
           sha256sum -c manifest.sha256
           rm apexchainx_calculator.wasm
 
@@ -81,7 +83,7 @@ jobs:
           name: release-hash-manifest
           path: |
             manifest.sha256
-            apexchainx_calculator/target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
+            target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
             docs/ROADMAP.md
           retention-days: 90
 
@@ -90,5 +92,5 @@ jobs:
         with:
           files: |
             manifest.sha256
-            apexchainx_calculator/target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
+            target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
             docs/ROADMAP.md

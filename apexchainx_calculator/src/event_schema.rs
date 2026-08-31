@@ -18,7 +18,7 @@
 //! - topic[2]: severity Symbol
 //! - payload:  (outage_id: Symbol, status: Symbol, payment_type: Symbol,
 //!   rating: Symbol, mttr_minutes: u32, threshold_minutes: u32,
-//!   amount: i128)
+//!   amount: i128, config_version_hash: u64, recorded_at: u64)
 //!
 //! ## set_int (`set_int`)
 //! Settlement intent emitted alongside sla_calc for backend reconciliation.
@@ -26,11 +26,23 @@
 //! - payload:  (outage_id: Symbol, status: Symbol, payment_type: Symbol,
 //!   amount: i128, config_version_hash: u64, recorded_at: u64)
 //!
+//! ## dup_input (`dup_input`)
+//! Emitted when `calculate_sla` rejects a conflicting duplicate `outage_id`
+//! (the `DuplicateOutageInput` error path). Carries the previously stored
+//! `SLAResult` so consumers can reconcile the rejection without a separate
+//! `get_latest_by_outage` read. (#385)
+//! - topic[2]: severity Symbol
+//! - payload:  (outage_id: Symbol, status: Symbol, mttr_minutes: u32,
+//!   threshold_minutes: u32, amount: i128, payment_type: Symbol,
+//!   rating: Symbol, config_version_hash: u64, recorded_at: u64)
+//!
 //! ## cfg_upd (`cfg_upd`)
 //! Emitted on every successful `set_config` call.
 //! - topic[2]: severity Symbol
 //! - payload:  (threshold_minutes: u32, penalty_per_minute: i128,
 //!   reward_base: i128)
+//! - repeated writes preserve invocation order; see the regression policy in
+//!   `docs/PROJECT_CONTEXT.md`
 //!
 //! ## paused (`paused`)
 //! Emitted when the contract is paused.
@@ -43,8 +55,13 @@
 //! - payload:  (false,)
 //!
 //! ## op_set (`op_set`)
-//! Emitted on operator change.
-//! - topic[2]: caller Address
+//! Emitted when the operator is set directly by the admin (single-step legacy path).
+//! Unlike the two-step path (`op_prop` → `op_acc`), this event indicates the new
+//! operator did **not** consent to the role change — `set_operator` only requires
+//! the admin's authorization. Consumers that need to distinguish consented from
+//! non-consented operator changes should check for this event name vs. the
+//! `op_prop`+`op_acc` pair.
+//! - topic[2]: caller Address (admin who performed the set)
 //! - payload:  (new_operator: Address,)
 //!
 //! ## pruned (`pruned`)
@@ -164,6 +181,11 @@
 //!
 //! Backends MUST check `deprecated_symbols` at startup and log warnings for
 //! any deprecated symbols they still rely on.
+//!
+//! # Review Checklist
+//!
+//! When adding or modifying events, refer to both the SC-099 Event-Topic Schema
+//! Checklist and the SC-100 Public Method Review Checklist in `CONTRIBUTING.md`.
 
 #![allow(dead_code)]
 
@@ -176,6 +198,8 @@ pub const EVENT_VERSION: Symbol = symbol_short!("v1");
 pub const EVENT_SLA_CALC: Symbol = symbol_short!("sla_calc");
 pub const EVENT_SETTLE_INTENT: Symbol = symbol_short!("set_int");
 pub const EVENT_CONFIG_UPD: Symbol = symbol_short!("cfg_upd");
+/// Emitted when a custom severity is removed via remove_custom_severity.
+pub const EVENT_CONFIG_REM: Symbol = symbol_short!("cfg_rem");
 pub const EVENT_PAUSED: Symbol = symbol_short!("paused");
 pub const EVENT_UNPAUSED: Symbol = symbol_short!("unpause");
 pub const EVENT_OP_SET: Symbol = symbol_short!("op_set");
@@ -192,6 +216,8 @@ pub const EVENT_CONFIG_FREEZE: Symbol = symbol_short!("cfg_frz");
 pub const EVENT_CONFIG_UNFREEZE: Symbol = symbol_short!("cfg_unfrz");
 /// Emitted when a running-stats counter saturates. (SC-W5-047)
 pub const EVENT_STATS_SAT: Symbol = symbol_short!("stats_sat");
+/// Emitted on the `DuplicateOutageInput` error path with the stored result. (#385)
+pub const EVENT_DUP_INPUT: Symbol = symbol_short!("dup_input");
 pub const EVENT_MIGRATE_DONE: &str = "migrate_done";
 
 /// Returns the canonical event version string for consumer documentation.
@@ -215,6 +241,7 @@ mod tests {
             EVENT_SLA_CALC,
             EVENT_SETTLE_INTENT,
             EVENT_CONFIG_UPD,
+            EVENT_CONFIG_REM,
             EVENT_PAUSED,
             EVENT_UNPAUSED,
             EVENT_OP_SET,
@@ -230,6 +257,7 @@ mod tests {
             EVENT_CONFIG_FREEZE,
             EVENT_CONFIG_UNFREEZE,
             EVENT_STATS_SAT,
+            EVENT_DUP_INPUT,
         ];
 
         for i in 0..names.len() {

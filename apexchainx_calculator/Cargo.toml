@@ -8,7 +8,9 @@ repository = "https://github.com/ApexChainx/ApexChainx-Contracts"
 publish = false
 
 [lib]
-crate-type = ["cdylib"]
+# `cdylib` is the deployable WASM artifact; `rlib` lets external crates (e.g.
+# the cargo-fuzz harness in `fuzz/`) link against the contract as a library.
+crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []

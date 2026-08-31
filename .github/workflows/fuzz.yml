@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [compute_result, validate_config]
+        target: [compute_result, validate_config, config_mutation_sequences]
 
     steps:
       - name: Checkout
@@ -63,14 +63,25 @@ jobs:
             echo "Generated seed: $SEED"
           fi
 
+      # Built as its own step so a target that no longer compiles fails the job
+      # loudly. It previously shared a step with the run below, whose
+      # `2>/dev/null || true` hid compile errors and crashes alike.
+      - name: Build fuzz targets
+        working-directory: apexchainx_calculator/fuzz
+        run: cargo +nightly fuzz build ${{ matrix.target }}
+
+      # The exit code is deliberately NOT swallowed. The targets now assert the
+      # contract's documented semantics (docs/FUZZING_GUARANTEES.md), so a
+      # non-zero exit means libFuzzer found an input where the implementation
+      # and the spec disagree — that must fail the run, not be discarded.
+      # libFuzzer exits 0 when -max_total_time elapses without a finding.
       - name: Run fuzz target
         working-directory: apexchainx_calculator/fuzz
         run: |
           cargo +nightly fuzz run ${{ matrix.target }} \
             -- \
             -max_total_time=${{ env.FUZZ_DURATION }} \
-            -artifact_prefix=fuzz/artifacts/${{ matrix.target }}/ \
-            -dict=fuzz/dictionaries/${{ matrix.target }}.dict 2>/dev/null || true
+            -artifact_prefix=fuzz/artifacts/${{ matrix.target }}/
 
       - name: Generate summary
         if: always()
@@ -117,7 +128,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Persist corpus back to repo
-        if: github.event_name == 'schedule'
+        if: success() && github.event_name == 'schedule'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

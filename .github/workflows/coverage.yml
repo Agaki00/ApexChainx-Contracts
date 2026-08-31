@@ -37,10 +37,11 @@ jobs:
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
+          # Workspace build — artifacts land in the ROOT target/, not apexchainx_calculator/target/.
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            apexchainx_calculator/target
+            target
           key: coverage-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             coverage-${{ runner.os }}-cargo-

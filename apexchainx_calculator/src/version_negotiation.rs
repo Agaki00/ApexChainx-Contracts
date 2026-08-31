@@ -26,11 +26,21 @@
 //! Existing backend-facing endpoints (`get_version_info`, `get_migration_state`)
 //! on the SLA calculator are extended with this protocol so that multi-contract
 //! backends can verify all contracts agree before deploying.
+//!
+//! # Changing this module
+//!
+//! This protocol runs against independently deployed peers, so a small change
+//! here can break interoperability across contracts. Before editing, read
+//! `docs/VERSION_NEGOTIATION_CONTRIBUTOR_GUIDE.md` for the compatibility
+//! constraints (append-only payloads, ordinal `NegotiationOutcome` variants,
+//! fail-closed negotiation, directional version-constant rules) and the
+//! author/reviewer checklists that PRs touching this file must satisfy.
 
 use soroban_sdk::{contracttype, symbol_short, Env, Symbol, Vec};
 
 /// Version information for a single contract, designed to be returned by
 /// a standard `get_version_info()` function on any contract in the ecosystem.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VersionNegotiationInfo {
@@ -49,6 +59,7 @@ pub struct VersionNegotiationInfo {
 }
 
 /// The outcome of a version negotiation between multiple contracts.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NegotiationOutcome {
@@ -61,6 +72,7 @@ pub enum NegotiationOutcome {
 }
 
 /// Describes which contract(s) caused an incompatibility.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VersionMismatchDetail {
@@ -73,6 +85,7 @@ pub struct VersionMismatchDetail {
 }
 
 /// Full result of a version negotiation across a set of contracts.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VersionNegotiationResult {
@@ -93,7 +106,7 @@ pub const CONTRACT_SETTLEMENT: Symbol = symbol_short!("settle");
 
 /// Current protocol version for the multi-contract ecosystem.
 pub const PROTOCOL_VERSION: u32 = 1;
-/// Minimum protocol version we can interoperate with.
+/// Minimum protocol version this contract can interoperate with.
 pub const MIN_COMPATIBLE_PROTOCOL: u32 = 1;
 
 /// Builds the `VersionNegotiationInfo` for this contract (apexchainx_calculator).
@@ -176,8 +189,8 @@ pub fn negotiate_contract_versions(
 /// downstream contracts should expose for version discovery.
 pub fn version_discovery_interfaces(env: &Env) -> Vec<Symbol> {
     let mut ifaces = Vec::new(env);
-    ifaces.push_back(symbol_short!("ver_info"));
-    ifaces.push_back(symbol_short!("mig_state"));
+    ifaces.push_back(Symbol::new(env, "get_version_info"));
+    ifaces.push_back(Symbol::new(env, "get_migration_state"));
     ifaces.push_back(symbol_short!("is_paused"));
     ifaces
 }
@@ -301,9 +314,31 @@ mod tests {
         let env = Env::default();
         let ifaces = version_discovery_interfaces(&env);
         assert_eq!(ifaces.len(), 3);
-        assert!(ifaces.contains(&symbol_short!("ver_info")));
-        assert!(ifaces.contains(&symbol_short!("mig_state")));
+        assert!(ifaces.contains(&Symbol::new(&env, "get_version_info")));
+        assert!(ifaces.contains(&Symbol::new(&env, "get_migration_state")));
         assert!(ifaces.contains(&symbol_short!("is_paused")));
+    }
+
+    #[test]
+    fn test_version_discovery_interfaces_match_actual_methods() {
+        let env = Env::default();
+        let ifaces = version_discovery_interfaces(&env);
+        
+        // Verify each discovery symbol corresponds to an actual contract method
+        // These are the exact method names exposed in the contract's public API
+        let expected_methods = [
+            Symbol::new(&env, "get_version_info"),
+            Symbol::new(&env, "get_migration_state"),
+            symbol_short!("is_paused"),
+        ];
+        
+        for expected_method in expected_methods.iter() {
+            assert!(
+                ifaces.contains(expected_method),
+                "Discovery list should contain actual method: {:?}",
+                expected_method
+            );
+        }
     }
 
     #[test]
