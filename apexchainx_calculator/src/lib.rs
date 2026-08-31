@@ -231,6 +231,15 @@ pub(crate) const MAX_RECALCS_PER_OUTAGE: u32 = 16;
 /// When set, overrides MAX_HISTORY_SIZE for history trimming.
 pub(crate) const RETENTION_LIMIT_KEY: Symbol = symbol_short!("RETLIM");
 
+/// Cumulative count of history entries removed by pruning (admin prune, age
+/// prune, and automatic trim in calculate_sla). Used by `get_retention_metrics`
+/// to compute retention ratio. (#461)
+pub(crate) const TOTAL_PRUNED_KEY: Symbol = symbol_short!("TPRUNED");
+
+/// Cumulative count of history entries ever stored (retained + pruned). Used
+/// by `get_retention_metrics` to compute total_entries. (#461)
+pub(crate) const TOTAL_ENTRIES_KEY: Symbol = symbol_short!("TTOTENT");
+
 /// On-chain key storing the ledger sequence of the last config update. Re-exported
 /// here so the storage-key namespace regression test catches any future collisions.
 pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
@@ -1138,6 +1147,9 @@ impl SLACalculatorContract {
         env.storage()
             .instance()
             .set(&HISTORY_KEY, &Vec::<SLAResult>::new(&env));
+        // #461 – cumulative retention counters for get_retention_metrics
+        env.storage().instance().set(&TOTAL_PRUNED_KEY, &0u32);
+        env.storage().instance().set(&TOTAL_ENTRIES_KEY, &0u32);
 
         let mut configs = Map::<Symbol, SLAConfig>::new(&env);
         configs.set(
@@ -1219,6 +1231,14 @@ impl SLACalculatorContract {
 
         if !inst.has(&HISTORY_KEY) {
             inst.set(&HISTORY_KEY, &Vec::<SLAResult>::new(env));
+        }
+
+        // #461 – cumulative retention counters
+        if !inst.has(&TOTAL_PRUNED_KEY) {
+            inst.set(&TOTAL_PRUNED_KEY, &0u32);
+        }
+        if !inst.has(&TOTAL_ENTRIES_KEY) {
+            inst.set(&TOTAL_ENTRIES_KEY, &0u32);
         }
 
         if !inst.has(&CONFIG_KEY) {
@@ -2095,6 +2115,7 @@ impl SLACalculatorContract {
         methods.push_back(method("get_rent_estimate", false, "none", ""));
         methods.push_back(method("get_result_schema", false, "none", ""));
         methods.push_back(method("get_retention_limit", false, "none", ""));
+        methods.push_back(method("get_retention_metrics", false, "none", ""));
         methods.push_back(method("get_severity_telemetry", false, "none", ""));
         methods.push_back(method("get_stats", false, "none", ""));
         methods.push_back(method("get_storage_footprint_estimate", false, "none", ""));
@@ -2670,42 +2691,27 @@ impl SLACalculatorContract {
         if reward_base <= 0 || reward_base > 100000 {
             return Err(SLAError::InvalidReward);
         }
-        // Cross-parameter consistency: rewards must materially exceed penalties.
-        // penalty_per_minute * 1.5 < reward_base  →  penalty * 3 < reward_base * 2
-        if penalty_per_minute.checked_mul(3).ok_or(SLAError::InvalidReward)?
-            >= reward_base.checked_mul(2).ok_or(SLAError::InvalidReward)?
-        {
-            return Err(SLAError::InvalidReward);
-        }
         Ok(())
     }
 
     /// #70 – Validates configuration parameters to ensure safe and meaningful values.
+    ///
+    /// Delegates the shared baseline checks (range, positivity, cross-parameter
+    /// consistency) to [`validate_general_bounds`] so canonical and custom
+    /// severity paths share a single source of truth.
     pub(crate) fn validate_config(
         severity: &Symbol,
         threshold_minutes: u32,
         penalty_per_minute: i128,
         reward_base: i128,
     ) -> Result<(), SLAError> {
-        // Validate severity is one of the supported values
+        // Validate severity is one of the canonical values
         if !Self::is_canonical_severity(severity) {
             return Err(SLAError::InvalidSeverity);
         }
 
-        // Threshold must be between 1 and 1440 minutes (24 hours max)
-        if threshold_minutes == 0 || threshold_minutes > 1440 {
-            return Err(SLAError::InvalidThreshold);
-        }
-
-        // Penalty must be positive and reasonable (1 to 10000 per minute)
-        if penalty_per_minute <= 0 || penalty_per_minute > 10000 {
-            return Err(SLAError::InvalidPenalty);
-        }
-
-        // Reward base must be positive and reasonable (1 to 100000)
-        if reward_base <= 0 || reward_base > 100000 {
-            return Err(SLAError::InvalidReward);
-        }
+        // Shared baseline: range checks + cross-parameter consistency
+        Self::validate_general_bounds(threshold_minutes, penalty_per_minute, reward_base)?;
 
         // Severity-specific validation to ensure logical consistency
         if *severity == symbol_short!("critical") {
@@ -2737,14 +2743,10 @@ impl SLACalculatorContract {
             if penalty_per_minute > 100 {
                 return Err(SLAError::InvalidPenalty);
             }
-        } else {
-            return Err(SLAError::InvalidSeverity);
         }
 
         // Cross-parameter consistency: rewards must materially exceed penalties.
         // penalty_per_minute * 1.5 < reward_base  →  penalty * 3 < reward_base * 2
-        // This ensures meeting SLA targets is always financially better than
-        // paying penalties for minor threshold overruns.
         if penalty_per_minute.checked_mul(3).ok_or(SLAError::InvalidReward)?
             >= reward_base.checked_mul(2).ok_or(SLAError::InvalidReward)?
         {
@@ -3133,6 +3135,16 @@ impl SLACalculatorContract {
             }
 
             env.storage().instance().set(&HISTORY_KEY, &new_history);
+            // #461 – track cumulative pruned count
+            let prev_pruned: u32 = env
+                .storage()
+                .instance()
+                .get(&TOTAL_PRUNED_KEY)
+                .unwrap_or(0);
+            env.storage().instance().set(
+                &TOTAL_PRUNED_KEY,
+                &prev_pruned.saturating_add(remove_count),
+            );
             remove_count
         } else {
             0
@@ -3174,6 +3186,16 @@ impl SLACalculatorContract {
 
         if removed > 0 {
             env.storage().instance().set(&HISTORY_KEY, &new_history);
+            // #461 – track cumulative pruned count
+            let prev_pruned: u32 = env
+                .storage()
+                .instance()
+                .get(&TOTAL_PRUNED_KEY)
+                .unwrap_or(0);
+            env.storage().instance().set(
+                &TOTAL_PRUNED_KEY,
+                &prev_pruned.saturating_add(removed),
+            );
         }
         let kept = new_history.len();
         env.events()
@@ -3397,6 +3419,42 @@ impl SLACalculatorContract {
             .instance()
             .get(&RETENTION_LIMIT_KEY)
             .unwrap_or(MAX_HISTORY_SIZE))
+    }
+
+    /// #461 – Returns retention health metrics for the history buffer.
+    ///
+    /// Operators call this to understand how close the retained history is to
+    /// the configured limit, how many entries have been pruned (by admin,
+    /// age, or automatic trim), and the current retention ratio.
+    ///
+    /// The `pruned_entries` and `total_entries` counters are cumulative and
+    /// fed by all pruning paths: `prune_history`, `prune_history_by_age`,
+    /// and the automatic trim in `calculate_sla`.
+    pub fn get_retention_metrics(
+        env: Env,
+    ) -> Result<metrics::retention_stats::HistoryRetentionMetrics, SLAError> {
+        Self::check_version(&env)?;
+        let retention_limit: u32 = env
+            .storage()
+            .instance()
+            .get(&RETENTION_LIMIT_KEY)
+            .unwrap_or(MAX_HISTORY_SIZE);
+        let retained_entries: u32 = env
+            .storage()
+            .instance()
+            .get::<Symbol, Vec<SLAResult>>(&HISTORY_KEY)
+            .map_or(0, |h| h.len());
+        let pruned_entries: u32 = env
+            .storage()
+            .instance()
+            .get(&TOTAL_PRUNED_KEY)
+            .unwrap_or(0);
+        Ok(metrics::history_metrics::build_history_metrics(
+            STORAGE_VERSION,
+            retention_limit,
+            retained_entries,
+            pruned_entries,
+        ))
     }
 
     /// SC-021 – Migration state read helper

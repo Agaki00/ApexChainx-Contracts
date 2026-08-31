@@ -459,6 +459,8 @@ fn test_storage_key_namespace_symbols_are_distinct() {
     //   HISTORY_KEY                = "HIST"
     //   STORAGE_VERSION_KEY        = "VER"
     //   RETENTION_LIMIT_KEY        = "RETLIM"
+    //   TOTAL_PRUNED_KEY           = "TPRUNED"
+    //   TOTAL_ENTRIES_KEY          = "TTOTENT"
     //   LAST_CFG_UPDATE_KEY        = "LCFGUPD"  (re-exported from config_metadata)
     // -----------------------------------------------------------------------
     let keys = [
@@ -480,6 +482,8 @@ fn test_storage_key_namespace_symbols_are_distinct() {
         HISTORY_KEY,
         STORAGE_VERSION_KEY,
         RETENTION_LIMIT_KEY,
+        TOTAL_PRUNED_KEY,
+        TOTAL_ENTRIES_KEY,
         LAST_CFG_UPDATE_KEY,
     ];
 
@@ -8944,10 +8948,9 @@ fn test_get_public_api_includes_all_major_methods() {
 fn test_get_public_api_method_count_is_stable() {
     let (_env, client, _actors) = setup();
     let api = client.get_public_api();
-    // 61 methods as of get_contract_info/get_storage_footprint_estimate/
-    // get_rent_estimate being added to the descriptor (#418).
+    // 62 methods as of get_retention_metrics being added (#461).
     // This test catches accidental additions or removals
-    assert_eq!(api.methods.len(), 61, "Public API method count changed");
+    assert_eq!(api.methods.len(), 62, "Public API method count changed");
 }
 
 #[test]
