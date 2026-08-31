@@ -302,6 +302,22 @@
 
 ---
 
+### Exposure Errors
+
+#### Code 22: `ExposureOverflow`
+
+| Field | Value |
+|-------|-------|
+| **Category** | Arithmetic (read-only view) |
+| **Severity** | Error |
+| **Recovery** | Adjust severity configs so aggregate totals fit in i128 |
+| **Consumer Impact** | The `get_economic_exposure` view cannot return aggregate totals because they overflow `i128`. Per-severity breakdown entries computed before the overflow are not returned. |
+| **Emitted By** | `get_economic_exposure` (read-only, no event emitted) |
+| **Recovery Strategy** | 1. Review per-severity `reward_base` and `penalty_per_minute` values via `get_config_snapshot()`. 2. Reduce configs so that the sums of `reward_base * 2` (4 severities) and `penalty_per_minute` (4 severities) each fit within `i128`. With current bounds (`reward_base ≤ 100 000`, `penalty_per_minute ≤ 10 000`), maximum totals are 800 000 and 40 000 respectively, so this error is unreachable under normal operation. |
+| **Runbook** | 1. Call `get_economic_exposure()` — if it returns `ExposureOverflow`, call `get_config_snapshot()` to inspect per-severity configs. 2. Identify which aggregate is overflowing by checking the magnitudes. 3. Admin adjusts configs via `set_config()` to reduce the totals. 4. Re-call `get_economic_exposure()`. |
+
+---
+
 ## Consumer Guidance: Handling Errors at the Backend
 
 ### At Startup
@@ -359,6 +375,9 @@ def handle_calculate_sla(outage_id, severity, mttr):
 | 17 InvalidInput | With corrected input | N/A | Fix input |
 | 18 SeverityNotInSet | After registration | N/A | Register severity |
 | 19 OutageRecalcLimit | After prune | N/A | Prune or new ID |
+| 20 ProposalExpired | No | N/A | Re-initiate proposal |
+| 21 AdminRenounced | No | N/A | Use operator path |
+| 22 ExposureOverflow | Adjust configs | N/A | Reduce config magnitudes |
 
 ---
 
