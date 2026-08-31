@@ -51,6 +51,15 @@ pub fn is_config_frozen(env: &Env) -> bool {
         .unwrap_or(false)
 }
 
+/// Requires that the configuration is not currently frozen.
+/// Returns `Err(SLAError::ConfigFrozen)` if frozen.
+pub fn require_not_frozen(env: &Env) -> Result<(), crate::SLAError> {
+    if is_config_frozen(env) {
+        return Err(crate::SLAError::ConfigFrozen);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{SLACalculatorContract, SLACalculatorContractClient};
@@ -130,5 +139,40 @@ mod tests {
             &100,
             &750,
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "#16")]
+    fn test_propose_admin_fails_when_frozen() {
+        let (_env, client, admin, _operator) = setup();
+        let new_admin = Address::generate(&_env);
+        client.freeze_config(&admin);
+        client.propose_admin(&admin, &new_admin);
+    }
+
+    #[test]
+    #[should_panic(expected = "#16")]
+    fn test_propose_operator_fails_when_frozen() {
+        let (_env, client, admin, _operator) = setup();
+        let new_op = Address::generate(&_env);
+        client.freeze_config(&admin);
+        client.propose_operator(&admin, &new_op);
+    }
+
+    #[test]
+    #[should_panic(expected = "#16")]
+    fn test_renounce_admin_fails_when_frozen() {
+        let (_env, client, admin, _operator) = setup();
+        client.freeze_config(&admin);
+        client.renounce_admin(&admin);
+    }
+
+    #[test]
+    #[should_panic(expected = "#16")]
+    fn test_set_operator_fails_when_frozen() {
+        let (_env, client, admin, _operator) = setup();
+        let new_op = Address::generate(&_env);
+        client.freeze_config(&admin);
+        client.set_operator(&admin, &new_op);
     }
 }

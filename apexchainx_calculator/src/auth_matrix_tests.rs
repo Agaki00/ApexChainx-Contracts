@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod auth_matrix_tests {
-    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
+    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Symbol};
     use crate::{SLACalculatorContract, SLACalculatorContractClient};
 
-    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
+    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
         env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(env, &contract_id);
@@ -38,7 +38,7 @@ mod auth_matrix_tests {
     fn test_only_admin_can_pause() {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
-        client.pause(&admin);
+        client.pause(&admin, &soroban_sdk::String::from_str(&env, "test"));
         client.unpause(&admin);
     }
 
@@ -55,7 +55,8 @@ mod auth_matrix_tests {
         let env = Env::default();
         let (_, operator, client) = setup(&env);
         for i in 1u32..=3 {
-            client.calculate_sla(&operator, &symbol_short!("OUT"), &symbol_short!("high"), &i);
+            let id = Symbol::new(&env, &alloc::format!("OUT{}", i));
+            client.calculate_sla(&operator, &id, &symbol_short!("high"), &i);
         }
         let stats = client.get_stats();
         assert_eq!(stats.total_calculations, 3);
@@ -64,6 +65,7 @@ mod auth_matrix_tests {
     #[test]
     fn test_unauthorized_caller_cannot_calculate() {
         let env = Env::default();
+        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
@@ -155,7 +157,7 @@ mod auth_matrix_tests {
         let env = Env::default();
         let (_, _, client) = setup(&env);
         let stranger = Address::generate(&env);
-        client.pause(&stranger);
+        client.pause(&stranger, &soroban_sdk::String::from_str(&env, "test"));
     }
 
     #[test]
@@ -175,6 +177,7 @@ mod auth_matrix_tests {
     #[test]
     fn test_no_role_equivalence_bypass_does_not_panic() {
         let env = Env::default();
+        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
