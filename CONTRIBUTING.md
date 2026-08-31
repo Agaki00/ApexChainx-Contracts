@@ -194,6 +194,11 @@ git checkout -b refactor/storage-layer
 - Update documentation as needed
 - Keep commits **focused and atomic** — one logical change per commit
 - Update `CHANGELOG.md` for any interface-affecting changes
+- **Never commit scratch/experimental code to the crate.** Throwaway probes
+  belong in `/tmp`, the fuzz corpus, or a branch that is never merged; every
+  `.rs` file that does land must be declared as a module in `src/lib.rs` or
+  the orphan-module lint (`just lint-orphans`) fails. See `CODING_STYLE.md`
+  Part 4 (#491).
 
 ### Step 3: Run Tests
 
@@ -293,6 +298,11 @@ Then open a pull request on GitHub with:
 - **Gas efficiency:** Minimize storage writes, avoid unnecessary loops
 - **Safety:** Use integer math only, validate all inputs, fail early
 - **Documentation:** All public functions must have doc comments following the canonical comment policy
+- **Optional state in `#[contracttype]` fields:** `Option<T>` cannot be a
+  `#[contracttype]` field, so absent state uses `Vec<T>` with a documented
+  max-length invariant (empty = absent, single-element = present); getters may
+  return `Result<Option<T>, _>`. Every new `#[contracttype]` struct follows
+  this convention — see `CODING_STYLE.md` Part 3 (#493).
 
 #### Style Rules
 

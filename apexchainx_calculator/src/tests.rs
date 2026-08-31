@@ -9184,6 +9184,90 @@ fn test_261_fingerprint_fails_on_uninitialized_contract() {
 }
 
 // ============================================================
+// Issue #494 – a config-hash failure inside the fingerprint must be
+// distinguishable from a valid hash.
+// ============================================================
+//
+// get_contract_state_fingerprint previously masked an unreadable config with
+// `unwrap_or(0)`, so a corrupt CONFIG_KEY was reported as a valid fingerprint
+// with config_version_hash = 0 — indistinguishable from a legitimate hash
+// (which can never be 0: the polynomial's seed is 1). The endpoint now
+// propagates the config read error, so an operator comparing pre/post-upgrade
+// fingerprints sees a loud failure instead of a bogus zero.
+
+#[test]
+#[should_panic]
+fn test_494_fingerprint_fails_when_config_key_missing() {
+    // Simulate storage corruption: the storage version exists (so the contract
+    // is "initialized") but CONFIG_KEY has been removed. The fingerprint must
+    // not silently report config_version_hash = 0 — it must fail.
+    let (env, client, _actors) = setup();
+
+    env.as_contract(&client.address, || {
+        env.storage().instance().remove(&CONFIG_KEY);
+    });
+
+    client.get_contract_state_fingerprint();
+}
+
+#[test]
+#[should_panic]
+fn test_494_fingerprint_fails_when_config_partially_missing() {
+    // A partially-missing config: CONFIG_KEY exists but the stored map lacks one
+    // of the four canonical severities. compute_config_version_hash must surface
+    // ConfigNotFound rather than fabricate a hash over a partial config.
+    let (env, client, _actors) = setup();
+
+    let mut partial: soroban_sdk::Map<Symbol, SLAConfig> = soroban_sdk::Map::new(&env);
+    partial.set(
+        symbol_short!("critical"),
+        SLAConfig {
+            threshold_minutes: 30,
+            penalty_per_minute: 100,
+            reward_base: 1000,
+        },
+    );
+    partial.set(
+        symbol_short!("high"),
+        SLAConfig {
+            threshold_minutes: 120,
+            penalty_per_minute: 50,
+            reward_base: 800,
+        },
+    );
+    partial.set(
+        symbol_short!("medium"),
+        SLAConfig {
+            threshold_minutes: 240,
+            penalty_per_minute: 25,
+            reward_base: 500,
+        },
+    );
+    // Note: no "low" entry — the map is partial.
+
+    env.as_contract(&client.address, || {
+        env.storage().instance().set(&CONFIG_KEY, &partial);
+    });
+
+    client.get_contract_state_fingerprint();
+}
+
+#[test]
+fn test_494_fingerprint_hash_never_zero_on_readable_config() {
+    // The positive contract: with a readable config, the hash is never 0, so 0
+    // remains an unambiguous signal that something is wrong. This pins the
+    // "0 is only reachable via the old fallback" property from the issue.
+    let (_env, client, actors) = setup();
+    let fingerprint = client.get_contract_state_fingerprint();
+    assert_ne!(fingerprint.config_version_hash, 0);
+
+    // Also non-zero after a config update (the hash changes, but stays valid).
+    client.set_config(&actors.admin, &symbol_short!("critical"), &20, &200, &1000);
+    let fingerprint = client.get_contract_state_fingerprint();
+    assert_ne!(fingerprint.config_version_hash, 0);
+}
+
+// ============================================================
 // #244 – Public API descriptor tests
 // ============================================================
 
@@ -9357,6 +9441,174 @@ fn test_get_public_api_requires_initialization() {
 
     // No initialize() called — get_public_api must panic
     client.get_public_api();
+}
+
+// ============================================================
+// Issue #492 – get_public_api descriptor completeness guardrail
+// ============================================================
+//
+// get_public_api() hand-enumerates the API surface, and for a long time the
+// descriptor drifted from the #[contractimpl] block (get_contract_info,
+// get_storage_footprint_estimate and get_rent_estimate were missing, #418)
+// with no test noticing. These tests are the enforcement mechanism: they
+// compare the descriptor against CANONICAL_PUBLIC_METHODS in BOTH directions.
+//
+// CANONICAL_PUBLIC_METHODS is the impl-truth list — it must contain exactly
+// the public methods the #[contractimpl] block exposes, with their documented
+// (mutates, auth, event) metadata. When you add, remove, or rename a public
+// contract method:
+//   1. update the #[contractimpl] block in lib.rs,
+//   2. update get_public_api() in lib.rs, and
+//   3. update CANONICAL_PUBLIC_METHODS here.
+//
+// Forgetting any one of the three fails one of the two tests below, so the
+// drift class is closed in both directions:
+//   - a public method absent from the descriptor fails
+//     test_492_descriptor_covers_every_public_method,
+//   - a descriptor entry that no longer exists on the impl fails
+//     test_492_descriptor_lists_only_declared_methods.
+//
+// The auth/mutates/event columns encode intent and cannot be derived
+// mechanically from the Rust signature, so they are pinned here as the
+// documented metadata (see #492 out-of-scope notes on mechanical derivation).
+const CANONICAL_PUBLIC_METHODS: &[(&str, bool, &str, &str)] = &[
+    // Lifecycle: two-step role handoff. accept_* are called by the proposed
+    // address (not the current role holder), so auth is "none".
+    ("accept_admin", true, "none", "adm_acc"),
+    ("accept_operator", true, "none", "op_acc"),
+    // Calculation:
+    ("calculate_sla", true, "operator", "sla_calc"),
+    ("calculate_sla_view", false, "none", ""),
+    ("cancel_admin_proposal", true, "admin", "adm_can"),
+    ("cancel_operator_proposal", true, "admin", "op_can"),
+    // Config:
+    ("freeze_config", true, "admin", "cfg_frz"),
+    ("get_admin", false, "none", ""),
+    ("get_config", false, "none", ""),
+    ("get_config_bundle", false, "none", ""),
+    ("get_config_count", false, "none", ""),
+    ("get_config_snapshot", false, "none", ""),
+    ("get_config_version_hash", false, "none", ""),
+    ("get_contract_info", false, "none", ""),
+    ("get_contract_metadata", false, "none", ""),
+    ("get_contract_state_fingerprint", false, "none", ""),
+    ("get_custom_config_snapshot", false, "none", ""),
+    ("get_custom_severity", false, "none", ""),
+    ("get_economic_exposure", false, "none", ""),
+    ("get_failure_schema", false, "none", ""),
+    ("get_full_audit_state", false, "none", ""),
+    ("get_history", false, "none", ""),
+    ("get_history_by_outage", false, "none", ""),
+    ("get_history_page", false, "none", ""),
+    ("get_history_page_with_meta", false, "none", ""),
+    ("get_latest_by_outage", false, "none", ""),
+    ("get_last_config_update", false, "none", ""),
+    ("get_migration_state", false, "none", ""),
+    ("get_operator", false, "none", ""),
+    ("get_pause_info", false, "none", ""),
+    ("get_pending_admin", false, "none", ""),
+    ("get_pending_operator", false, "none", ""),
+    ("get_public_api", false, "none", ""),
+    ("get_rent_estimate", false, "none", ""),
+    ("get_result_schema", false, "none", ""),
+    ("get_retention_limit", false, "none", ""),
+    ("get_severity_telemetry", false, "none", ""),
+    ("get_stats", false, "none", ""),
+    ("get_storage_footprint_estimate", false, "none", ""),
+    ("get_storage_version", false, "none", ""),
+    ("get_version_info", false, "none", ""),
+    // Health:
+    ("healthcheck", false, "none", ""),
+    // Init:
+    ("initialize", true, "admin", ""),
+    ("is_config_frozen", false, "none", ""),
+    ("is_paused", false, "none", ""),
+    ("list_configs", false, "none", ""),
+    // Migration:
+    ("migrate", true, "admin", "migrate_done"),
+    // Pause:
+    ("pause", true, "admin", "paused"),
+    ("propose_admin", true, "admin", "adm_prop"),
+    ("propose_operator", true, "admin", "op_prop"),
+    ("prune_history", true, "admin", "pruned"),
+    ("prune_history_by_age", true, "admin", "pruned_a"),
+    ("remove_custom_severity", true, "admin", "cfg_upd"),
+    ("renounce_admin", true, "admin", "adm_ren"),
+    ("replay_calculate_sla", true, "operator", "sla_calc"),
+    // Setters:
+    ("set_config", true, "admin", "cfg_upd"),
+    ("set_custom_severity", true, "admin", "cfg_upd"),
+    ("set_operator", true, "admin", "op_set"),
+    ("set_retention_limit", true, "admin", ""),
+    ("unfreeze_config", true, "admin", "cfg_unfrz"),
+    ("unpause", true, "admin", "unpause"),
+];
+
+#[test]
+fn test_492_descriptor_covers_every_public_method() {
+    // Direction 1: every impl-truth method must appear in the descriptor with
+    // identical metadata. Fails when a public #[contractimpl] method is absent
+    // from get_public_api (or its metadata drifted).
+    let (_env, client, _actors) = setup();
+    let api = client.get_public_api();
+
+    for (name, mutates, auth, event) in CANONICAL_PUBLIC_METHODS {
+        let mut found = false;
+        for i in 0..api.methods.len() {
+            let method = api.methods.get(i).unwrap();
+            if method.name == Symbol::new(&_env, name) {
+                found = true;
+                assert_eq!(
+                    method.mutates, *mutates,
+                    "get_public_api mutates flag for {} drifted from the impl",
+                    name
+                );
+                assert_eq!(
+                    method.auth,
+                    Symbol::new(&_env, auth),
+                    "get_public_api auth for {} drifted from the impl",
+                    name
+                );
+                assert_eq!(
+                    method.event,
+                    Symbol::new(&_env, event),
+                    "get_public_api event for {} drifted from the impl",
+                    name
+                );
+            }
+        }
+        assert!(
+            found,
+            "public method '{}' is missing from get_public_api — add it to the \
+             descriptor in lib.rs (and keep CANONICAL_PUBLIC_METHODS in sync)",
+            name
+        );
+    }
+}
+
+#[test]
+fn test_492_descriptor_lists_only_declared_methods() {
+    // Direction 2: every descriptor entry must exist on the impl. Fails when
+    // the descriptor lists a method that was removed from the #[contractimpl]
+    // block (or when CANONICAL_PUBLIC_METHODS was pruned without updating the
+    // descriptor).
+    let (_env, client, _actors) = setup();
+    let api = client.get_public_api();
+
+    let declared: alloc::collections::BTreeSet<&str> =
+        CANONICAL_PUBLIC_METHODS.iter().map(|(name, ..)| *name).collect();
+
+    for i in 0..api.methods.len() {
+        let method = api.methods.get(i).unwrap();
+        let name = method.name.to_string();
+        assert!(
+            declared.contains(name.as_str()),
+            "get_public_api lists '{}' but it is not a declared public method — \
+             remove it from the descriptor in lib.rs (or add it to the \
+             #[contractimpl] block and CANONICAL_PUBLIC_METHODS)",
+            name
+        );
+    }
 }
 
 #[test]

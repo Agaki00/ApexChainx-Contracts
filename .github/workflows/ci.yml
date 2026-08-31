@@ -35,6 +35,14 @@ jobs:
       - name: no_std compatibility lint (early gate)
         run: ./scripts/check-no-std.sh
 
+      # Issue #491: Orphan module lint — fails when a `.rs` file in the crate
+      # is never declared as a module (e.g. the committed scratch_test.rs that
+      # shipped for weeks without CI noticing). An undeclared file is invisible
+      # to cargo check/clippy/test, so its tests rot silently; this gate closes
+      # that class.
+      - name: Orphan module lint (early gate)
+        run: ./scripts/check-orphan-modules.sh
+
       # Issue #12: WASM no-std compliance check.
       # Compiles only the library crate for wasm32-unknown-unknown so that any
       # accidental `std` import surfaces here (before deployment) as a compile

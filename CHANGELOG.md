@@ -107,6 +107,12 @@
   - Performs configuration parameter validation (SC-W5-046)
 - `get_stats` now returns a `SLAStats` struct; callers should use field access rather than tuple destructuring
 - History entries returned by `get_history` include `schema_version` for result envelope versioning
+- `get_contract_state_fingerprint` no longer reports `config_version_hash = 0` when the config is unreadable. Previously an unreadable `CONFIG_KEY` (storage corruption, bad migration) was masked with `unwrap_or(0)`, making a corrupt config indistinguishable from a legitimate hash — which is never 0 — and defeating the endpoint's incident-response purpose. A config-hash failure now propagates as `NotInitialized`/`ConfigNotFound`, and the documented error contract was updated to match; tests cover the missing-key and partially-missing-config paths (#494)
+
+### Added
+- `scripts/check-orphan-modules.sh` — orphan-module lint that fails when a `.rs` file under the crate is never declared as a module (an undeclared file is invisible to cargo check/clippy/test, so its tests rot silently). Wired into CI as an early gate and available as `just lint-orphans`. The leftover `apexchainx_calculator/scratch_test.rs` was removed as part of this (#491)
+- `get_public_api` descriptor completeness guardrail — `test_492_descriptor_covers_every_public_method` and `test_492_descriptor_lists_only_declared_methods` compare the hand-enumerated descriptor against the canonical `CANONICAL_PUBLIC_METHODS` list in both directions, so a public method missing from the descriptor or a descriptor entry that no longer exists on the impl fails CI (#492)
+- `AuditState.pause_info` invariant enforcement — a test pins the `Vec`-stands-in-for-`Option` convention (empty when unpaused, exactly one element when paused, always matching `get_pause_info`), and `CODING_STYLE.md` Part 3 documents the single convention governing absent state across `#[contracttype]` surfaces; Part 4 documents the module-declaration and scratch-code policy (#493)
 
 ---
 

@@ -3686,8 +3686,19 @@ impl SLACalculatorContract {
     /// # Errors
     ///
     /// Returns `NotInitialized` if the contract has never been initialized (no
-    /// `STORAGE_VERSION_KEY` present). All other contract states return a valid
-    /// fingerprint, including pre-migration and paused states.
+    /// `STORAGE_VERSION_KEY` present).
+    ///
+    /// Returns `NotInitialized` or `ConfigNotFound` when the configuration is
+    /// unreadable (e.g. `CONFIG_KEY` is missing or a canonical severity is absent
+    /// from the stored map). This is deliberate (#494): a corrupt config must not
+    /// be reported as a valid fingerprint with a bogus `config_version_hash` of
+    /// `0` — an operator comparing pre/post-upgrade fingerprints would otherwise
+    /// be unable to tell a corrupt config from a merely different one. The
+    /// endpoint's audit purpose (release review, upgrade planning, incident
+    /// response) requires the unreadable-config case to surface as an error.
+    ///
+    /// All *readable* contract states return a valid fingerprint, including
+    /// pre-migration and paused states.
     ///
     /// # Safety
     ///
@@ -3707,9 +3718,12 @@ impl SLACalculatorContract {
         let needs_migration = stored_version != STORAGE_VERSION;
 
         // Config version hash computation is safe even in pre-migration state
-        // because load_config works across all initialized states.
-        // If config is unreadable, fall back to sentinel 0.
-        let config_version_hash: u64 = Self::compute_config_version_hash(&env).unwrap_or(0);
+        // because load_config works across all initialized states. An unreadable
+        // config (missing CONFIG_KEY, or a canonical severity absent from the
+        // map) is propagated as an error rather than masked with a sentinel 0:
+        // a legitimate hash is never 0, so 0 would be indistinguishable from a
+        // corrupt config (see #494).
+        let config_version_hash: u64 = Self::compute_config_version_hash(&env)?;
 
         // Pause and freeze state default to false if keys are absent.
         let is_paused: bool = env.storage().instance().get(&PAUSED_KEY).unwrap_or(false);

@@ -218,6 +218,12 @@ wasm-release:
 no-std:
     cd {{crate}} && cargo check --target {{wasm_target}} --lib
 
+# Fail when a .rs file in the crate is never declared as a module (#491).
+# An undeclared file is invisible to cargo check/clippy/test and rots silently;
+# see scripts/check-orphan-modules.sh.                    [CI: client-checks]
+lint-orphans:
+    ./scripts/check-orphan-modules.sh
+
 # sha256 of the release WASM.            [CI: Generate hash]
 hash: wasm-release
     #!/usr/bin/env bash
@@ -340,5 +346,5 @@ clean:
     cd {{crate}} && cargo clean
 
 # Everything CI gates on, in CI's order. Run before opening a PR.
-ci: fmt-check lint check no-std test fuzz fuzz-spec parity-check ts-check wasm machete udeps verify-snapshots
+ci: fmt-check lint check no-std lint-orphans test fuzz fuzz-spec parity-check ts-check wasm machete udeps verify-snapshots
     @echo "✓ local CI equivalent passed"
