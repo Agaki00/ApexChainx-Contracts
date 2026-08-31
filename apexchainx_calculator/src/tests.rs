@@ -3514,6 +3514,79 @@ fn test_get_history_page_with_meta_items_match_get_history_page() {
     }
 }
 
+/// #503 - Matrix test asserting get_history_page_with_meta(offset, limit).items == get_history_page(offset, limit)
+/// and has_more against a manual count across edge cases (empty history, offset beyond end, limit 0, limit exceeding remaining).
+#[test]
+fn test_get_history_page_equivalence_and_has_more_matrix() {
+    let (_env, client, actors) = setup();
+
+    // 1. Test empty history matrix
+    let empty_offsets = [0u32, 1, 10, u32::MAX];
+    let limits = [0u32, 1, 2, 5, 100, u32::MAX];
+
+    for &offset in &empty_offsets {
+        for &limit in &limits {
+            let plain = client.get_history_page(&offset, &limit);
+            let meta = client.get_history_page_with_meta(&offset, &limit);
+
+            assert_eq!(
+                meta.items, plain,
+                "empty history items mismatch at offset={} limit={}",
+                offset, limit
+            );
+            assert_eq!(meta.total, 0);
+            assert!(
+                !meta.has_more,
+                "has_more should be false for empty history at offset={} limit={}",
+                offset, limit
+            );
+        }
+    }
+
+    // 2. Test populated history matrix (len = 5)
+    for i in 0..5u32 {
+        let oid = Symbol::new(&_env, &alloc::format!("PG_EQ_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+    let total_len = 5u32;
+
+    let offsets = [0u32, 1, 2, 4, 5, 6, 100, u32::MAX];
+
+    for &offset in &offsets {
+        for &limit in &limits {
+            let plain = client.get_history_page(&offset, &limit);
+            let meta = client.get_history_page_with_meta(&offset, &limit);
+
+            // Equivalence assertion: meta.items == get_history_page(offset, limit)
+            assert_eq!(
+                meta.items, plain,
+                "items mismatch at offset={} limit={}",
+                offset, limit
+            );
+            assert_eq!(
+                meta.total, total_len,
+                "total mismatch at offset={} limit={}",
+                offset, limit
+            );
+
+            // Manual calculation for has_more
+            let expected_has_more = if offset >= total_len {
+                false
+            } else if limit == 0 {
+                true
+            } else {
+                offset.saturating_add(limit.min(200)) < total_len
+            };
+
+            assert_eq!(
+                meta.has_more, expected_has_more,
+                "has_more mismatch at offset={} limit={}: expected {}, got {}",
+                offset, limit, expected_has_more, meta.has_more
+            );
+        }
+    }
+}
+
 #[test]
 fn test_get_history_page_with_meta_saturating_arithmetic() {
     let (_env, client, actors) = setup();
@@ -8471,6 +8544,73 @@ fn test_economic_exposure_returns_error_on_penalty_overflow() {
         error_responses::is_exposure_overflow(&result.unwrap_err().unwrap()),
         "Expected ExposureOverflow but got a different error"
     );
+}
+
+// ============================================================
+// #504 – Custom severity view behavior pinning tests
+// ============================================================
+
+/// #504 - Pins current canonical-only behavior of get_economic_exposure when a custom severity is registered.
+/// Currently get_economic_exposure iterates canonical_severities only; registered custom severities are omitted from breakdown.
+#[test]
+fn test_economic_exposure_with_custom_severity_pins_canonical_only_behavior() {
+    let (_env, client, actors) = setup();
+
+    // Register a custom severity ("warning") with valid bounds (threshold 90, penalty 5, reward 200)
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+
+    let exposure = client.get_economic_exposure();
+
+    // Current behavior: breakdown contains only the 4 canonical severities; custom severity is omitted
+    assert_eq!(exposure.breakdown.len(), 4);
+    let has_warning = exposure
+        .breakdown
+        .iter()
+        .any(|e| e.severity == symbol_short!("warning"));
+    assert!(
+        !has_warning,
+        "get_economic_exposure currently omits custom severities"
+    );
+
+    // Totals match only the canonical sum (5700 max reward, 185 penalty rate)
+    assert_eq!(exposure.total_max_reward, 5700);
+    assert_eq!(exposure.total_penalty_per_minute, 185);
+}
+
+/// #504 - Pins current behavior of get_severity_telemetry when calculate_sla runs against a custom severity.
+/// Currently custom-severity calculate_sla calls map to index 0 (critical lane), misattributing counts to critical.
+#[test]
+fn test_severity_telemetry_with_custom_severity_pins_canonical_lane_attribution() {
+    let (env, client, actors) = setup();
+    env.ledger().set_timestamp(1000);
+
+    // Register a custom severity ("warning")
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+
+    // Execute calculate_sla for custom severity causing a violation (mttr 100 > threshold 90)
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("CUST001"),
+        &symbol_short!("warning"),
+        &100,
+    );
+
+    let telemetry = client.get_severity_telemetry();
+
+    // The telemetry output has 5 entries (4 canonical + 1 custom)
+    assert_eq!(telemetry.len(), 5);
+
+    // Current behavior: custom activity is misattributed to critical lane (index 0)
+    let critical = telemetry.get(0).unwrap();
+    assert_eq!(critical.severity, symbol_short!("critical"));
+    assert_eq!(critical.calculations, 1);
+    assert_eq!(critical.violations, 1);
+
+    // The custom severity entry ("warning") shows 0 calculations and 0 violations
+    let warning = telemetry.get(4).unwrap();
+    assert_eq!(warning.severity, symbol_short!("warning"));
+    assert_eq!(warning.calculations, 0);
+    assert_eq!(warning.violations, 0);
 }
 
 // ============================================================

@@ -129,14 +129,15 @@ pub struct ContractInfo {
 /// identity, version posture, and feature availability before resuming
 /// operations. The `schema_version` field lets consumers detect when
 /// new fields have been added to `ContractInfo`.
+///
+/// This function intentionally bypasses `check_version()` so backend consumers
+/// can observe `needs_migration == true` pre-migration during startup handshake.
 pub fn get_contract_info(env: &Env) -> Result<ContractInfo, SLAError> {
-    SLACalculatorContract::check_version(env)?;
-
     let stored_version: u32 = env
         .storage()
         .instance()
         .get(&crate::STORAGE_VERSION_KEY)
-        .unwrap_or(0);
+        .ok_or(SLAError::NotInitialized)?;
     let needs_migration = stored_version != STORAGE_VERSION;
     let is_paused: bool = env.storage().instance().get(&crate::PAUSED_KEY).unwrap_or(false);
 
@@ -318,13 +319,13 @@ mod tests {
             let info = get_contract_info(&env).unwrap();
             assert!(!info.needs_migration);
 
-            // Corrupt the stored version: get_contract_info must now surface
-            // an explicit VersionMismatch error (the contract reports that it
-            // needs migration instead of returning stale metadata).
+            // Change stored version: get_contract_info returns a ContractInfo
+            // struct with needs_migration: true and the stored storage_version.
             env.storage().instance().set(&crate::STORAGE_VERSION_KEY, &99u32);
 
-            let err = get_contract_info(&env).unwrap_err();
-            assert_eq!(err, crate::SLAError::VersionMismatch);
+            let info_mig = get_contract_info(&env).unwrap();
+            assert!(info_mig.needs_migration);
+            assert_eq!(info_mig.storage_version, 99u32);
         });
     }
 
