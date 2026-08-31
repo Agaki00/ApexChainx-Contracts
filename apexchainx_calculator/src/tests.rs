@@ -2262,6 +2262,188 @@ fn test_wrong_address_cannot_accept_operator() {
 }
 
 // ============================================================
+// Operator path audit trail: set_operator vs. two-step
+// ============================================================
+
+/// Verify that `set_operator` emits only `op_set` and does NOT produce
+/// `op_prop` or `op_acc` events — the single-step path has a distinct
+/// event shape from the two-step handoff.
+#[test]
+fn test_set_operator_emits_only_op_set_event() {
+    let (env, client, actors) = setup();
+    let new_op = soroban_sdk::Address::generate(&env);
+
+    client.set_operator(&actors.admin, &new_op);
+
+    let events = env.events().all();
+    let mut op_set_count = 0u32;
+    let mut op_prop_count = 0u32;
+    let mut op_acc_count = 0u32;
+    for i in 0..events.len() {
+        let (_, topics, _) = events.get(i).unwrap();
+        if topics.len() >= 1 {
+            let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+            if name == EVENT_OP_SET {
+                op_set_count += 1;
+            }
+            if name == EVENT_OP_PROP {
+                op_prop_count += 1;
+            }
+            if name == EVENT_OP_ACC {
+                op_acc_count += 1;
+            }
+        }
+    }
+    assert_eq!(op_set_count, 1, "set_operator must emit exactly one op_set event");
+    assert_eq!(op_prop_count, 0, "set_operator must NOT emit op_prop");
+    assert_eq!(op_acc_count, 0, "set_operator must NOT emit op_acc");
+}
+
+/// Verify that the two-step path (`propose_operator` + `accept_operator`)
+/// emits `op_prop` and `op_acc` events but NOT `op_set`.
+#[test]
+fn test_two_step_operator_emits_op_prop_and_op_acc() {
+    let (env, client, actors) = setup();
+    let new_op = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &new_op);
+    client.accept_operator(&new_op);
+
+    let events = env.events().all();
+    let mut op_set_count = 0u32;
+    let mut op_prop_count = 0u32;
+    let mut op_acc_count = 0u32;
+    for i in 0..events.len() {
+        let (_, topics, _) = events.get(i).unwrap();
+        if topics.len() >= 1 {
+            let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+            if name == EVENT_OP_SET {
+                op_set_count += 1;
+            }
+            if name == EVENT_OP_PROP {
+                op_prop_count += 1;
+            }
+            if name == EVENT_OP_ACC {
+                op_acc_count += 1;
+            }
+        }
+    }
+    assert_eq!(op_set_count, 0, "two-step path must NOT emit op_set");
+    assert_eq!(op_prop_count, 1, "two-step path must emit exactly one op_prop");
+    assert_eq!(op_acc_count, 1, "two-step path must emit exactly one op_acc");
+}
+
+/// `set_operator` does not clear a pending operator proposal.
+/// If a two-step proposal is pending and admin calls `set_operator`, the
+/// pending proposal remains in storage and can still be accepted.
+#[test]
+fn test_set_operator_does_not_clear_pending_operator_slot() {
+    let (env, client, actors) = setup();
+    let pending_op = soroban_sdk::Address::generate(&env);
+    let direct_op = soroban_sdk::Address::generate(&env);
+
+    // Step 1: create a two-step proposal
+    client.propose_operator(&actors.admin, &pending_op);
+    assert_eq!(client.get_pending_operator(), Some(pending_op.clone()));
+
+    // Step 2: admin calls set_operator (single-step) with a different address
+    client.set_operator(&actors.admin, &direct_op);
+    assert_eq!(client.get_operator(), direct_op, "operator should be the directly-set address");
+
+    // Pending proposal must still be in storage
+    assert_eq!(
+        client.get_pending_operator(),
+        Some(pending_op.clone()),
+        "pending operator slot must survive set_operator"
+    );
+
+    // The pending operator can still accept
+    client.accept_operator(&pending_op);
+    assert_eq!(
+        client.get_operator(),
+        pending_op,
+        "pending operator should become the operator after accept"
+    );
+    assert_eq!(client.get_pending_operator(), None, "pending slot cleared after accept");
+}
+
+/// `set_operator` does not require the new operator's consent.
+/// Unlike `accept_operator` (which calls `require_auth()` on the new operator),
+/// `set_operator` only needs the admin's authorization.
+#[test]
+fn test_set_operator_does_not_require_new_operator_consent() {
+    let (env, client, actors) = setup();
+    let new_op = soroban_sdk::Address::generate(&env);
+
+    // Only admin auth is needed; new_op does not need to consent.
+    // With mock_all_auths this is implicitly tested, but the test documents
+    // the consent semantics by name and asserts the operator changes.
+    client.set_operator(&actors.admin, &new_op);
+    assert_eq!(client.get_operator(), new_op);
+
+    // The new operator can immediately act without having "accepted" anything.
+    let result = client.calculate_sla(&new_op, &symbol_short!("CONSENT01"), &symbol_short!("critical"), &5);
+    assert_eq!(result.status, symbol_short!("met"));
+}
+
+/// After `set_operator`, the old operator is locked out — same as two-step.
+/// This confirms both paths produce the same end-state security guarantee.
+#[test]
+fn test_set_operator_locks_out_old_operator() {
+    let (env, client, actors) = setup();
+    let new_op = soroban_sdk::Address::generate(&env);
+
+    client.set_operator(&actors.admin, &new_op);
+
+    // Old operator can no longer calculate
+    let result = client.try_calculate_sla(&actors.operator, &symbol_short!("LOCK01"), &symbol_short!("critical"), &5);
+    assert!(result.is_err(), "old operator must be locked out after set_operator");
+}
+
+/// `set_operator` after `propose_operator` does not invalidate the proposal.
+/// Admin can use the single-step path even when a two-step proposal exists;
+/// the proposal remains valid and can be accepted later.
+#[test]
+fn test_set_operator_after_propose_does_not_invalidate_proposal() {
+    let (env, client, actors) = setup();
+    let pending_op = soroban_sdk::Address::generate(&env);
+    let direct_op = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &pending_op);
+    client.set_operator(&actors.admin, &direct_op);
+
+    // Direct set took effect
+    assert_eq!(client.get_operator(), direct_op);
+
+    // Proposal still exists — verify the event trail reflects both paths
+    let events = env.events().all();
+    let mut op_prop_count = 0u32;
+    let mut op_set_count = 0u32;
+    let mut op_acc_count = 0u32;
+    for i in 0..events.len() {
+        let (_, topics, _) = events.get(i).unwrap();
+        if topics.len() >= 1 {
+            let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+            if name == EVENT_OP_PROP {
+                op_prop_count += 1;
+            }
+            if name == EVENT_OP_SET {
+                op_set_count += 1;
+            }
+            if name == EVENT_OP_ACC {
+                op_acc_count += 1;
+            }
+        }
+    }
+    assert_eq!(op_prop_count, 1, "must have op_prop from the proposal");
+    assert_eq!(op_set_count, 1, "must have op_set from the direct set");
+    assert_eq!(op_acc_count, 0, "must not have op_acc yet");
+
+    // Pending slot still holds the proposed address
+    assert_eq!(client.get_pending_operator(), Some(pending_op.clone()));
+}
+
+// ============================================================
 // #60 – Contract metadata / capabilities view
 // ============================================================
 
