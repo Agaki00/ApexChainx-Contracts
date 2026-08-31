@@ -32,6 +32,13 @@ pub fn set_config(
         reward_base,
     )?;
 
+    // Cross-severity threshold ordering: enforce critical <= high <= medium <= low
+    crate::SLACalculatorContract::validate_cross_severity_threshold_ordering(
+        env,
+        &severity,
+        threshold_minutes,
+    )?;
+
     let mut configs: Map<Symbol, SLAConfig> = env
         .storage()
         .instance()

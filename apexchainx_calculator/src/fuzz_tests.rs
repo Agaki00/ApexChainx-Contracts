@@ -466,6 +466,14 @@ fn config_check_invariants<'a>(client: &SLACalculatorContractClient<'a>) {
         penalty_at(0) >= penalty_at(1) && penalty_at(1) >= penalty_at(2),
         "cross-severity penalty ordering violated"
     );
+    let threshold_at = |i: u32| snapshot.entries.get(i).unwrap().config.threshold_minutes;
+    assert!(
+        threshold_at(0) <= threshold_at(1)
+            && threshold_at(1) <= threshold_at(2)
+            && threshold_at(2) <= threshold_at(3),
+        "cross-severity threshold ordering violated: critical={} high={} medium={} low={}",
+        threshold_at(0), threshold_at(1), threshold_at(2), threshold_at(3)
+    );
 
     let custom = client.get_custom_config_snapshot();
     for entry in custom.entries.iter() {

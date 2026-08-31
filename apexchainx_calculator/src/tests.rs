@@ -6005,8 +6005,11 @@ fn test_set_config_critical_rejects_penalty_49() {
 
 #[test]
 fn test_set_config_critical_accepts_threshold_60_penalty_50() {
-    // Exact boundary values must be accepted
+    // Exact boundary values must be accepted. Set higher severities first
+    // so cross-severity threshold ordering (critical <= high <= medium <= low)
+    // is satisfied when critical is updated to its max.
     let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("high"), &60, &50, &750);
     client.set_config(&actors.admin, &symbol_short!("critical"), &60, &50, &750);
     let cfg = client.get_config(&symbol_short!("critical"));
     assert_eq!(cfg.threshold_minutes, 60);
@@ -6033,7 +6036,10 @@ fn test_set_config_high_rejects_penalty_24() {
 
 #[test]
 fn test_set_config_high_accepts_threshold_120_penalty_25() {
+    // Set medium and low first so threshold ordering is satisfied.
     let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("medium"), &120, &25, &750);
+    client.set_config(&actors.admin, &symbol_short!("low"), &120, &10, &600);
     client.set_config(&actors.admin, &symbol_short!("high"), &120, &25, &750);
     let cfg = client.get_config(&symbol_short!("high"));
     assert_eq!(cfg.threshold_minutes, 120);
@@ -6060,7 +6066,9 @@ fn test_set_config_medium_rejects_penalty_9() {
 
 #[test]
 fn test_set_config_medium_accepts_threshold_240_penalty_10() {
+    // Set low first so threshold ordering (medium <= low) is satisfied.
     let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("low"), &240, &10, &600);
     client.set_config(&actors.admin, &symbol_short!("medium"), &240, &10, &750);
     let cfg = client.get_config(&symbol_short!("medium"));
     assert_eq!(cfg.threshold_minutes, 240);
@@ -6140,6 +6148,82 @@ fn test_set_config_rejection_does_not_affect_other_severities() {
     );
     assert_eq!(client.get_config(&symbol_short!("high")).threshold_minutes, 30);
     // default
+}
+
+// --- Cross-severity threshold ordering (Issue #487) ---
+//
+// The documented invariant is: critical.threshold <= high.threshold <=
+// medium.threshold <= low.threshold. These tests prove the invariant is
+// enforced by the contract.
+
+#[test]
+#[should_panic]
+fn test_set_config_rejects_high_threshold_shorter_than_critical() {
+    let (_env, client, actors) = setup();
+    // Set critical to 30
+    client.set_config(&actors.admin, &symbol_short!("critical"), &30, &100, &750);
+    // high must have threshold >= critical (30); setting to 20 must fail
+    client.set_config(&actors.admin, &symbol_short!("high"), &20, &50, &750);
+}
+
+#[test]
+#[should_panic]
+fn test_set_config_rejects_medium_threshold_shorter_than_high() {
+    let (_env, client, actors) = setup();
+    // Set high to 90
+    client.set_config(&actors.admin, &symbol_short!("high"), &90, &50, &750);
+    // medium must have threshold >= high (90); setting to 60 must fail
+    client.set_config(&actors.admin, &symbol_short!("medium"), &60, &25, &750);
+}
+
+#[test]
+#[should_panic]
+fn test_set_config_rejects_low_threshold_shorter_than_medium() {
+    let (_env, client, actors) = setup();
+    // Set medium to 180
+    client.set_config(&actors.admin, &symbol_short!("medium"), &180, &25, &750);
+    // low must have threshold >= medium (180); setting to 120 must fail
+    client.set_config(&actors.admin, &symbol_short!("low"), &120, &10, &600);
+}
+
+#[test]
+#[should_panic]
+fn test_set_config_rejects_critical_threshold_longer_than_high() {
+    let (_env, client, actors) = setup();
+    // Set high to 90
+    client.set_config(&actors.admin, &symbol_short!("high"), &90, &50, &750);
+    // critical must have threshold <= high (90); setting to 120 must fail
+    // (also exceeds critical's own cap of 60, but the ordering check fires first
+    //  via InvalidThreshold)
+    client.set_config(&actors.admin, &symbol_short!("critical"), &120, &100, &750);
+}
+
+#[test]
+fn test_set_config_accepts_valid_threshold_ordering() {
+    let (_env, client, actors) = setup();
+    // Set configs in canonical order: critical <= high <= medium <= low
+    client.set_config(&actors.admin, &symbol_short!("critical"), &15, &100, &750);
+    client.set_config(&actors.admin, &symbol_short!("high"), &30, &50, &750);
+    client.set_config(&actors.admin, &symbol_short!("medium"), &60, &25, &750);
+    client.set_config(&actors.admin, &symbol_short!("low"), &120, &10, &600);
+
+    assert_eq!(client.get_config(&symbol_short!("critical")).threshold_minutes, 15);
+    assert_eq!(client.get_config(&symbol_short!("high")).threshold_minutes, 30);
+    assert_eq!(client.get_config(&symbol_short!("medium")).threshold_minutes, 60);
+    assert_eq!(client.get_config(&symbol_short!("low")).threshold_minutes, 120);
+}
+
+#[test]
+fn test_set_config_accepts_equal_thresholds() {
+    let (_env, client, actors) = setup();
+    // Equal thresholds across all severities should be accepted (non-decreasing)
+    client.set_config(&actors.admin, &symbol_short!("critical"), &30, &100, &750);
+    client.set_config(&actors.admin, &symbol_short!("high"), &30, &50, &750);
+    client.set_config(&actors.admin, &symbol_short!("medium"), &30, &25, &750);
+    client.set_config(&actors.admin, &symbol_short!("low"), &30, &10, &600);
+
+    assert_eq!(client.get_config(&symbol_short!("critical")).threshold_minutes, 30);
+    assert_eq!(client.get_config(&symbol_short!("low")).threshold_minutes, 30);
 }
 
 // --- Zero and negative-equivalent edge cases ---
