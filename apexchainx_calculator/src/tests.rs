@@ -8064,6 +8064,73 @@ fn test_economic_exposure_independent_of_history() {
     assert_eq!(exposure_before, exposure_after);
 }
 
+/// (i) SC-W5-047 – When aggregate totals would overflow i128, the view
+/// returns `ExposureOverflow` instead of silently capping.
+///
+/// This test injects extreme config values directly into storage
+/// (bypassing `set_config` validation) to trigger the overflow path.
+#[test]
+fn test_economic_exposure_returns_error_on_overflow() {
+    let (env, client, _actors) = setup();
+
+    // Inject extreme configs via raw storage (bypasses validation).
+    // Each severity gets reward_base = i128::MAX / 4 + 1, so
+    // max_reward = (i128::MAX / 4 + 1) * 200 / 100 ≈ i128::MAX / 2,
+    // and the sum of 4 severities overflows i128.
+    let extreme_reward: i128 = (i128::MAX / 4) + 1;
+    let cfg = SLAConfig {
+        threshold_minutes: 15,
+        penalty_per_minute: 50,
+        reward_base: extreme_reward,
+    };
+    let mut extreme_configs = Map::<Symbol, SLAConfig>::new(&env);
+    extreme_configs.set(symbol_short!("critical"), cfg.clone());
+    extreme_configs.set(symbol_short!("high"), cfg.clone());
+    extreme_configs.set(symbol_short!("medium"), cfg.clone());
+    extreme_configs.set(symbol_short!("low"), cfg);
+    env.as_contract(&client.address, || {
+        env.storage().instance().set(&CONFIG_KEY, &extreme_configs);
+    });
+
+    let result = client.try_get_economic_exposure();
+    assert!(result.is_err());
+    // The underlying error should be ExposureOverflow (code 22)
+    assert!(
+        error_responses::is_exposure_overflow(&result.unwrap_err().unwrap()),
+        "Expected ExposureOverflow but got a different error"
+    );
+}
+
+/// (j) SC-W5-047 – When penalty_per_minute totals would overflow i128,
+/// the view returns `ExposureOverflow` instead of silently capping.
+#[test]
+fn test_economic_exposure_returns_error_on_penalty_overflow() {
+    let (env, client, _actors) = setup();
+
+    // Inject extreme penalty_per_minute values via raw storage.
+    let extreme_penalty: i128 = (i128::MAX / 4) + 1;
+    let cfg = SLAConfig {
+        threshold_minutes: 15,
+        penalty_per_minute: extreme_penalty,
+        reward_base: 100,
+    };
+    let mut extreme_configs = Map::<Symbol, SLAConfig>::new(&env);
+    extreme_configs.set(symbol_short!("critical"), cfg.clone());
+    extreme_configs.set(symbol_short!("high"), cfg.clone());
+    extreme_configs.set(symbol_short!("medium"), cfg.clone());
+    extreme_configs.set(symbol_short!("low"), cfg);
+    env.as_contract(&client.address, || {
+        env.storage().instance().set(&CONFIG_KEY, &extreme_configs);
+    });
+
+    let result = client.try_get_economic_exposure();
+    assert!(result.is_err());
+    assert!(
+        error_responses::is_exposure_overflow(&result.unwrap_err().unwrap()),
+        "Expected ExposureOverflow but got a different error"
+    );
+}
+
 // ============================================================
 // #218 – Read-only healthcheck path
 // ============================================================
@@ -8863,6 +8930,7 @@ fn test_failure_catalog_matches_error_helpers() {
         SLAError::OutageRecalcLimit,
         SLAError::ProposalExpired,
         SLAError::AdminRenounced,
+        SLAError::ExposureOverflow,
     ];
 
     for err in all_variants {
@@ -8888,6 +8956,7 @@ fn test_failure_catalog_matches_error_helpers() {
             SLAError::OutageRecalcLimit => error_responses::is_outage_recalc_limit(&err),
             SLAError::ProposalExpired => error_responses::is_proposal_expired(&err),
             SLAError::AdminRenounced => error_responses::is_admin_renounced(&err),
+            SLAError::ExposureOverflow => error_responses::is_exposure_overflow(&err),
         };
         assert!(
             recognized,
@@ -9569,6 +9638,9 @@ const fn is_terminal(code: u32) -> bool {
         17 /* InvalidInput */         => true,
         18 /* SeverityNotInSet */     => true,
         19 /* OutageRecalcLimit */    => false, // pruning frees headroom
+        20 /* ProposalExpired */       => true,
+        21 /* AdminRenounced */        => true,  // renounce is irreversible
+        22 /* ExposureOverflow */      => true,  // config-bounds issue, not retryable
         _ => true, // unknown future codes are terminal by default
     }
 }
@@ -9602,7 +9674,9 @@ fn test_227_all_error_codes_are_classified() {
 
     // The enum has 19 variants (codes 1..19). Verify every one is
     // covered by our classification table.
-    let expected_codes: [u32; 19] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
+    let expected_codes: [u32; 22] = [
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+    ];
 
     for code in &expected_codes {
         // Classification must not panic — every code is handled.
@@ -9633,7 +9707,7 @@ fn test_227_retryable_errors_are_recoverable() {
 fn test_227_terminal_errors_are_truly_terminal() {
     // Terminal errors reflect permanent conditions — the caller must
     // change their input or their role; no state transition can fix them.
-    let terminal: [(u32, &str); 15] = [
+    let terminal: [(u32, &str); 18] = [
         (1, "AlreadyInitialized"),
         (2, "NotInitialized"),
         (3, "Unauthorized"),
@@ -9649,6 +9723,9 @@ fn test_227_terminal_errors_are_truly_terminal() {
         (15, "InvalidRewardAmount"),
         (17, "InvalidInput"),
         (18, "SeverityNotInSet"),
+        (20, "ProposalExpired"),
+        (21, "AdminRenounced"),
+        (22, "ExposureOverflow"),
     ];
 
     for (code, label) in &terminal {
@@ -9665,9 +9742,9 @@ fn test_227_error_classification_count_matches_enum() {
     // The total classified errors must match the enum size.
     // If this fails, a new SLAError variant was added — update both
     // the is_terminal table and this test.
-    let total = 4u32 /* retryable */ + 15u32 /* terminal */;
+    let total = 4u32 /* retryable */ + 18u32 /* terminal */;
     assert_eq!(
-        total, 19,
+        total, 22,
         "Classification count mismatch — did you add an SLAError variant?"
     );
 }

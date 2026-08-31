@@ -597,6 +597,13 @@ pub enum SLAError {
     ProposalExpired = 20,
     /// Admin authority was permanently renounced — admin-gated calls are no longer possible. (#406)
     AdminRenounced = 21,
+    /// Aggregate exposure totals overflowed i128 during summation.
+    ///
+    /// The read-only `get_economic_exposure` view sums per-severity
+    /// `max_reward` and `penalty_per_minute` values using checked arithmetic.
+    /// This error is returned when either aggregate overflows, preventing
+    /// silent capping at `i128::MAX`. (SC-W5-047 alignment)
+    ExposureOverflow = 22,
 }
 
 // -----------------------------------------------------------------------
@@ -1883,7 +1890,7 @@ impl SLACalculatorContract {
 
         // Emit in numeric order for deterministic consumption
         // All descriptions must be <= 32 bytes (Soroban Symbol constraint)
-        let entries: [(u32, &str, &str); 21] = [
+        let entries: [(u32, &str, &str); 22] = [
             (1, "AlreadyInitialized", "Contract already initialized"),
             (2, "NotInitialized", "Contract not yet initialized"),
             (3, "Unauthorized", "Caller lacks required role"),
@@ -1905,6 +1912,7 @@ impl SLACalculatorContract {
             (19, "OutageRecalcLimit", "Outage recalc limit reached"),
             (20, "ProposalExpired", "Proposal expired"),
             (21, "AdminRenounced", "Admin authority renounced"),
+            (22, "ExposureOverflow", "Exposure totals overflow i128"),
         ];
 
         for (code, label, description) in entries {
@@ -2220,6 +2228,17 @@ impl SLACalculatorContract {
     /// The top-tier reward multiplier (200 %) is applied to `reward_base` to
     /// yield `max_reward` — matching the `compute_result` path for
     /// `performance_ratio < 50`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SLAError::ExposureOverflow`] if any aggregate total
+    /// overflows `i128` during summation. With the current validation bounds
+    /// (`reward_base ≤ 100 000`, `penalty_per_minute ≤ 10 000`, 4 canonical
+    /// severities) the maximum totals are `800 000` and `40 000` respectively,
+    /// so this error is unreachable today. Checked arithmetic is used
+    /// regardless for correctness-by-construction: a future bound relaxation
+    /// or custom-severity expansion will produce a clear error instead of
+    /// silently capping totals at `i128::MAX`. (SC-W5-047)
     pub fn get_economic_exposure(env: Env) -> Result<EconomicExposure, SLAError> {
         Self::check_version(&env)?;
 
@@ -2236,12 +2255,16 @@ impl SLACalculatorContract {
                 .reward_base
                 .checked_mul(200)
                 .map(|v| v.div_euclid(100))
-                .unwrap_or(i128::MAX);
+                .ok_or(SLAError::ExposureOverflow)?;
 
             let penalty_rate = cfg.penalty_per_minute;
 
-            total_max_reward = total_max_reward.saturating_add(max_reward);
-            total_penalty_per_minute = total_penalty_per_minute.saturating_add(penalty_rate);
+            total_max_reward = total_max_reward
+                .checked_add(max_reward)
+                .ok_or(SLAError::ExposureOverflow)?;
+            total_penalty_per_minute = total_penalty_per_minute
+                .checked_add(penalty_rate)
+                .ok_or(SLAError::ExposureOverflow)?;
 
             breakdown.push_back(SeverityExposure {
                 severity,

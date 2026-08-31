@@ -110,3 +110,8 @@ pub fn is_proposal_expired(err: &SLAError) -> bool {
 pub fn is_admin_renounced(err: &SLAError) -> bool {
     matches!(err, SLAError::AdminRenounced)
 }
+
+/// Returns `true` if the error is `ExposureOverflow`. (SC-W5-047)
+pub fn is_exposure_overflow(err: &SLAError) -> bool {
+    matches!(err, SLAError::ExposureOverflow)
+}
