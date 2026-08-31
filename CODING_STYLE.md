@@ -282,4 +282,107 @@ If a property is expressed in a test and in a comment, the comment is likely to 
 
 This policy is enforced through the PR review checklist above. Reviewers must verify compliance with each category before approving. Automated enforcement via `cargo clippy` lints (`missing_docs`, `clippy::missing_errors_doc`) is enabled for public items; violations block CI.
 
+---
+
+## Part 3 — Optional-State Convention for `#[contracttype]` Surfaces (Issue #493)
+
+This section defines the single convention for representing **absent** state
+across `#[contracttype]` struct fields, so consumers never have to learn two
+shapes for the same semantic.
+
+### The SDK limitation
+
+`#[contracttype]` structs cannot contain `Option<T>` fields: the SDK's ScVal
+conversion for a derived `#[contracttype]` struct has no `From<&Option<T>>`
+impl, so a struct with an `Option` field does not compile. This is a platform
+limitation, not a design choice — every surface hits it independently and
+must apply the same rule.
+
+### The convention
+
+1. **`#[contracttype]` struct fields model absent state with `Vec<T>`.**
+   Empty = absent; single-element = present. Every such field must carry a
+   comment stating its **max-length invariant** (e.g. `len() <= 1`) so the
+   "one element max" rule is reviewable, plus the invariant must be pinned by
+   a test.
+2. **Getters may return `Result<Option<T>, _>`.** Function return values are
+   not subject to the `#[contracttype]` field limitation, so the read surface
+   (`get_pause_info`, `get_pending_admin`, `get_pending_operator`) uses
+   `Option` directly. The `Vec` field in an aggregate struct is the *wire*
+   representation; the `Option` getter is the *semantic* one, and they must
+   agree (empty ⇔ `None`, one element ⇔ `Some(_)`).
+3. **Never invent a second representation.** If a field can be absent, do not
+   use a sentinel value, a zero-address, or a `bool` flag alongside a `Vec` —
+   use the `Vec` convention and document the invariant.
+
+### Example
+
+```rust
+/// Pause metadata when paused, empty otherwise. `Vec` stands in for `Option`
+/// because `#[contracttype]` cannot convert `Option<PauseInfo>` (#493).
+/// INVARIANT: `pause_info.len() <= 1` — empty = unpaused, one element = paused.
+pub pause_info: Vec<PauseInfo>,
+```
+
+The invariant above is enforced by `audit_state::tests::
+test_audit_state_pause_info_invariant_across_pause_cycle`, which asserts
+empty ⇔ unpaused and exactly-one ⇔ paused, and that both match
+`get_pause_info()`.
+
+### Review checklist
+
+- [ ] Every new `#[contracttype]` struct field that can be absent uses `Vec<T>`
+      with a documented max-length invariant (Part 3 convention), never a
+      sentinel or a parallel `bool`.
+- [ ] The aggregate field and its `Option`-typed getter agree, pinned by a test.
+- [ ] Changing a `#[contracttype]` field's shape (e.g. `Vec<PauseInfo>` → a
+      wrapper) is an ABI change and must go through the stability process
+      (`api_stability.rs` field counts, schema version bump) — see
+      `docs/CONTRACT_SHAPE_CHANGE_CHECKLIST.md`.
+
+---
+
+## Part 4 — Module Declaration and Scratch Code Policy (Issue #491)
+
+This section defines where `.rs` files may live and where throwaway code
+belongs, so the crate never again ships code that CI cannot see.
+
+### The rule
+
+**Every `.rs` file under the crate must be declared as a module.** A file that
+exists on disk but is never declared is invisible to `cargo check`/`clippy`/
+`test` — it silently stops compiling and running, and its tests rot without
+any red flag. This is enforced by `scripts/check-orphan-modules.sh` (CI early
+gate and `just lint-orphans`), which fails on any undeclared `.rs` file under
+`apexchainx_calculator/`.
+
+Declaring a module is one line in `src/lib.rs`:
+
+```rust
+pub mod my_module;        // compiled into the contract
+#[cfg(test)]
+mod my_module_tests;      // test-only, compiled by `cargo test`
+```
+
+### Where throwaway code belongs
+
+Interactive experiments, scratch helpers, and one-off probes must **not** be
+committed to the crate. They belong in:
+
+- `/tmp` or a scratch directory outside the repository,
+- the fuzz corpus (`apexchainx_calculator/fuzz/`), when they are real
+  invariants worth fuzzing, or
+- a local branch that is never merged.
+
+If an experiment genuinely must live in the tree for a review cycle, it must
+be declared as a module (so CI compiles it and the orphan lint passes) and
+carry a `// TODO(#issue): remove` marker tracking its deletion.
+
+### Review checklist
+
+- [ ] No `.rs` file is added to the crate without a matching `mod` declaration
+      in `src/lib.rs` (`just lint-orphans` passes).
+- [ ] No scratch/experimental code is committed; experiments live in `/tmp`,
+      the fuzz corpus, or a never-merged branch.
+
 For questions or proposed policy amendments, open an issue referencing this document.
