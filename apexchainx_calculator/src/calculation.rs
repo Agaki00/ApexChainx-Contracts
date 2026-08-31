@@ -212,6 +212,12 @@ fn require_not_paused(env: &Env) -> Result<(), SLAError> {
     Ok(())
 }
 
+/// Maximum allowed MTTR in minutes to prevent arithmetic overflow.
+/// This conservative bound ensures that even with maximum penalty rates,
+/// the calculation cannot overflow i128. 
+/// 525,600 minutes = 365 days, well beyond any realistic outage duration.
+const MAX_MTTR_MINUTES: u32 = 525_600;
+
 /// Computes the SLA result (met/violated, reward/penalty, rating) from inputs.
 /// Pure function — no state reads or writes.
 pub fn compute_result(
@@ -222,6 +228,11 @@ pub fn compute_result(
     recorded_at: u64,
 ) -> Result<SLAResult, SLAError> {
     let threshold = cfg.threshold_minutes;
+    
+    // Validate input range before computation to provide clear error messages
+    if mttr_minutes > MAX_MTTR_MINUTES {
+        return Err(SLAError::InvalidInput);
+    }
 
     if mttr_minutes > threshold {
         let overtime = (mttr_minutes - threshold) as i128;
@@ -428,6 +439,8 @@ fn publish_sla_event(env: &Env, severity: Symbol, result: &SLAResult) {
             result.mttr_minutes,
             result.threshold_minutes,
             result.amount,
+            result.config_version_hash,
+            result.recorded_at,
         ),
     );
 }

@@ -3136,12 +3136,30 @@ fn test_get_history_page_with_meta_zero_limit() {
         client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
     }
 
-    // `limit == 0` returns an empty page with the correct total. The cursor
-    // has not advanced past `offset`, so history still remains at offset 0.
+    // `limit == 0` returns an empty page with the correct total. Per the
+    // pagination policy, an empty page signals end-of-history, so has_more is false.
     let page = client.get_history_page_with_meta(&0, &0);
     assert_eq!(page.total, 3);
     assert_eq!(page.items.len(), 0);
-    assert!(page.has_more);
+    assert!(!page.has_more);
+    
+    // Test limit == 0 at mid offset (offset = 1, total = 3)
+    let page_mid = client.get_history_page_with_meta(&1, &0);
+    assert_eq!(page_mid.total, 3);
+    assert_eq!(page_mid.items.len(), 0);
+    assert!(!page_mid.has_more);
+    
+    // Test limit == 0 at end offset (offset = 3, total = 3)
+    let page_end = client.get_history_page_with_meta(&3, &0);
+    assert_eq!(page_end.total, 3);
+    assert_eq!(page_end.items.len(), 0);
+    assert!(!page_end.has_more);
+    
+    // Test limit == 0 beyond end (offset = 100, total = 3)
+    let page_beyond = client.get_history_page_with_meta(&100, &0);
+    assert_eq!(page_beyond.total, 3);
+    assert_eq!(page_beyond.items.len(), 0);
+    assert!(!page_beyond.has_more);
 }
 
 #[test]

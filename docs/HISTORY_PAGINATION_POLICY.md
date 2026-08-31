@@ -102,7 +102,7 @@ wrapped in a `HistoryPage` struct:
 pub struct HistoryPage {
     pub items: Vec<SLAResult>, // identical to get_history_page(offset, limit)
     pub total: u32,            // full history length at read time
-    pub has_more: bool,        // end = min(saturating_add(offset, limit), total) < total
+    pub has_more: bool,        // (limit > 0) && (end = min(saturating_add(offset, limit), total) < total)
 }
 ```
 
@@ -112,12 +112,14 @@ pub struct HistoryPage {
 - `total` is the full history length, so consumers no longer need a separate
   `get_history` or `get_retention_limit` call to learn the total size.
 - `has_more` is `true` exactly when the requested range ends before the end
-  of history (`end < total`). A consumer can therefore iterate with
-  `offset += items.len()` and stop when `has_more` is `false`.
+  of history (`end < total`) **and** `limit > 0`. When `limit == 0`, `has_more`
+  is `false` because the empty page signals end-of-history per the policy.
+  A consumer can therefore iterate with `offset += items.len()` and stop when
+  `has_more` is `false` or when an empty page is returned.
 - The same empty-page edge cases apply to `items`: `offset >= total` and
-  `limit == 0` both produce an empty `items`. For `limit == 0` with
-  `offset < total`, `has_more` is still `true` because the cursor has not
-  advanced past `offset`.
+  `limit == 0` both produce an empty `items`. For `limit == 0`, `has_more` is
+  `false` to maintain consistency with the "empty page as end-of-history signal"
+  policy.
 
 `get_history_page_with_meta` is read-only, performs no storage writes, emits
 no events, and never mutates history.
