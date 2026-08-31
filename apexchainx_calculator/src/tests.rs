@@ -2348,7 +2348,11 @@ fn test_set_operator_does_not_clear_pending_operator_slot() {
 
     // Step 2: admin calls set_operator (single-step) with a different address
     client.set_operator(&actors.admin, &direct_op);
-    assert_eq!(client.get_operator(), direct_op, "operator should be the directly-set address");
+    assert_eq!(
+        client.get_operator(),
+        direct_op,
+        "operator should be the directly-set address"
+    );
 
     // Pending proposal must still be in storage
     assert_eq!(
@@ -2364,7 +2368,11 @@ fn test_set_operator_does_not_clear_pending_operator_slot() {
         pending_op,
         "pending operator should become the operator after accept"
     );
-    assert_eq!(client.get_pending_operator(), None, "pending slot cleared after accept");
+    assert_eq!(
+        client.get_pending_operator(),
+        None,
+        "pending slot cleared after accept"
+    );
 }
 
 /// `set_operator` does not require the new operator's consent.
@@ -2382,7 +2390,12 @@ fn test_set_operator_does_not_require_new_operator_consent() {
     assert_eq!(client.get_operator(), new_op);
 
     // The new operator can immediately act without having "accepted" anything.
-    let result = client.calculate_sla(&new_op, &symbol_short!("CONSENT01"), &symbol_short!("critical"), &5);
+    let result = client.calculate_sla(
+        &new_op,
+        &symbol_short!("CONSENT01"),
+        &symbol_short!("critical"),
+        &5,
+    );
     assert_eq!(result.status, symbol_short!("met"));
 }
 
@@ -2396,8 +2409,16 @@ fn test_set_operator_locks_out_old_operator() {
     client.set_operator(&actors.admin, &new_op);
 
     // Old operator can no longer calculate
-    let result = client.try_calculate_sla(&actors.operator, &symbol_short!("LOCK01"), &symbol_short!("critical"), &5);
-    assert!(result.is_err(), "old operator must be locked out after set_operator");
+    let result = client.try_calculate_sla(
+        &actors.operator,
+        &symbol_short!("LOCK01"),
+        &symbol_short!("critical"),
+        &5,
+    );
+    assert!(
+        result.is_err(),
+        "old operator must be locked out after set_operator"
+    );
 }
 
 /// `set_operator` after `propose_operator` does not invalidate the proposal.
