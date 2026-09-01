@@ -8,7 +8,8 @@ use soroban_sdk::{symbol_short, Env, Map, Symbol, Vec};
 
 use crate::{
     config_freeze, config_metadata, SLAConfig, SLAConfigEntry, SLAConfigSnapshot, SLAError, CONFIG_KEY,
-    CUSTOM_CONFIG_KEY, EVENT_CONFIG_UPD, EVENT_VERSION,
+    CONFIG_SNAPSHOT_SCHEMA_VERSION, CUSTOM_CONFIG_KEY, EVENT_CONFIG_REM, EVENT_CONFIG_UPD,
+    EVENT_SEV_ADD, EVENT_SEV_UPD, EVENT_VERSION,
 };
 
 /// Sets the SLA configuration for a given severity level.
@@ -30,6 +31,13 @@ pub fn set_config(
         threshold_minutes,
         penalty_per_minute,
         reward_base,
+    )?;
+
+    // Cross-severity threshold ordering: enforce critical <= high <= medium <= low
+    crate::SLACalculatorContract::validate_cross_severity_threshold_ordering(
+        env,
+        &severity,
+        threshold_minutes,
     )?;
 
     let mut configs: Map<Symbol, SLAConfig> = env
@@ -64,6 +72,24 @@ pub fn get_config(env: &Env, severity: Symbol) -> Result<SLAConfig, SLAError> {
 }
 
 /// Returns a deterministic backend-friendly snapshot of all canonical config values.
+///
+/// # Canonical Config Endpoint
+///
+/// This is the **canonical endpoint** for reading configuration data. It returns
+/// entries in a guaranteed canonical severity order (critical → high → medium → low)
+/// with typed `SLAConfigEntry` structs, making it suitable for:
+/// - Backend consumers that need stable ordering
+/// - Serialization and diffing logic
+/// - Config bundle generation
+///
+/// # When to Use list_configs Instead
+///
+/// Use `list_configs` only if you need:
+/// - Raw map access for low-level inspection
+/// - Direct iteration over the underlying storage map
+///
+/// Note that `list_configs` does not guarantee any ordering and returns raw
+/// `SLAConfig` values without the typed entry wrapper.
 pub fn get_config_snapshot(env: &Env) -> Result<SLAConfigSnapshot, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
 
@@ -75,12 +101,29 @@ pub fn get_config_snapshot(env: &Env) -> Result<SLAConfigSnapshot, SLAError> {
     }
 
     Ok(SLAConfigSnapshot {
-        version: symbol_short!("v1"),
+        version: CONFIG_SNAPSHOT_SCHEMA_VERSION,
         entries,
     })
 }
 
 /// Returns the full map of severity-to-config entries.
+///
+/// # Raw/Low-Level Config Endpoint
+///
+/// This is a **raw endpoint** that returns the underlying storage map directly.
+/// It is provided for low-level inspection and debugging purposes.
+///
+/// **Important caveats:**
+/// - Does **not** guarantee any ordering (map-internal ordering is SDK-dependent)
+/// - Returns raw `SLAConfig` values without the typed entry wrapper
+/// - Not suitable for consumers that need stable ordering across SDK versions
+///
+/// # Canonical Endpoint
+///
+/// For most use cases, use `get_config_snapshot` instead, which:
+/// - Guarantees canonical severity order (critical → high → medium → low)
+/// - Returns typed `SLAConfigEntry` structs with severity labels
+/// - Is stable across SDK versions
 pub fn list_configs(env: &Env) -> Result<Map<Symbol, SLAConfig>, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     env.storage()
@@ -104,10 +147,15 @@ pub fn get_last_config_update(env: &Env) -> Result<Option<crate::ConfigUpdateInf
 /// Registers or updates a custom (non-canonical) severity level.
 ///
 /// # Overwrite & Lifecycle Behavior
-/// - If a custom severity with the given symbol is not registered, it is added to `CUSTCFG`.
-/// - If a custom severity with the given symbol already exists, calling `set_custom_severity`
-///   overwrites the existing parameters (`threshold_minutes`, `penalty_per_minute`, `reward_base`) in-place.
-/// - In both cases, a `cfg_upd` (`EVENT_CONFIG_UPD`) event is emitted with the severity symbol and parameters.
+/// - If a custom severity with the given symbol is not registered, a `sev_add`
+///   (`EVENT_SEV_ADD`) event is emitted — indexers can reconstruct the
+///   registered set from these creation events alone.
+/// - If a custom severity with the given symbol already exists, a `sev_upd`
+///   (`EVENT_SEV_UPD`) event is emitted — indexers can tell reconfiguration
+///   from first registration by the distinct event name.
+/// - The payload shape is identical in both cases `(threshold_minutes,
+///   penalty_per_minute, reward_base)` so consumers that only care about
+///   values can parse either event.
 pub fn set_custom_severity(
     env: &Env,
     severity: Symbol,
@@ -134,6 +182,10 @@ pub fn set_custom_severity(
         .get(&CUSTOM_CONFIG_KEY)
         .unwrap_or_else(|| Map::new(env));
 
+    // #456 – Determine lifecycle transition before writing so the emitted
+    // event distinguishes creation from reconfiguration.
+    let is_update = custom.contains_key(severity.clone());
+
     custom.set(
         severity.clone(),
         SLAConfig {
@@ -144,8 +196,13 @@ pub fn set_custom_severity(
     );
     env.storage().instance().set(&CUSTOM_CONFIG_KEY, &custom);
 
+    let event_name = if is_update {
+        EVENT_SEV_UPD
+    } else {
+        EVENT_SEV_ADD
+    };
     env.events().publish(
-        (EVENT_CONFIG_UPD, EVENT_VERSION, severity),
+        (event_name, EVENT_VERSION, severity),
         (threshold_minutes, penalty_per_minute, reward_base),
     );
     Ok(())
@@ -170,7 +227,7 @@ pub fn remove_custom_severity(env: &Env, severity: Symbol) -> Result<(), SLAErro
     env.storage().instance().set(&CUSTOM_CONFIG_KEY, &custom);
 
     env.events()
-        .publish((EVENT_CONFIG_UPD, EVENT_VERSION, severity), (0u32, 0i128, 0i128));
+        .publish((EVENT_CONFIG_REM, EVENT_VERSION, severity), ());
     Ok(())
 }
 
@@ -201,7 +258,7 @@ pub fn get_custom_config_snapshot(env: &Env) -> Result<SLAConfigSnapshot, SLAErr
     }
 
     Ok(SLAConfigSnapshot {
-        version: symbol_short!("v1"),
+        version: CONFIG_SNAPSHOT_SCHEMA_VERSION,
         entries,
     })
 }

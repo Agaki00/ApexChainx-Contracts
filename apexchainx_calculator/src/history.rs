@@ -74,11 +74,16 @@ pub fn prune_history(env: &Env, caller: &Address, keep_latest: u32) -> Result<()
 
 /// Prunes history entries older than `min_age_seconds`.
 /// Admin only. Emits a `pruned_a` event.
+///
+/// Returns `Err(SLAError::InvalidInput)` if `min_age_seconds >= now`.
 pub fn prune_history_by_age(env: &Env, caller: &Address, min_age_seconds: u64) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
 
     let now = env.ledger().timestamp();
+    if min_age_seconds >= now {
+        return Err(SLAError::InvalidInput);
+    }
     let cutoff = now.saturating_sub(min_age_seconds);
 
     let history: Vec<SLAResult> = env
@@ -163,7 +168,9 @@ pub fn get_history_page(env: &Env, offset: u32, limit: u32) -> Result<Vec<SLARes
 /// This is a metadata-carrying companion to [`get_history_page`]. The `items`
 /// slice is identical to what `get_history_page` returns for the same
 /// `(offset, limit)`; `total` is the full history length and `has_more` is
-/// `true` when the requested range ends before the end of history.
+/// `true` when the requested range ends before the end of history **and**
+/// `limit > 0`. When `limit == 0`, `has_more` is `false` (empty page signals
+/// end-of-history).
 ///
 /// Pagination semantics (offset-based, oldest-first, saturating
 /// `offset + limit`, empty page when `offset >= len` or `limit == 0`) are
@@ -182,21 +189,29 @@ pub fn get_history_page_with_meta(env: &Env, offset: u32, limit: u32) -> Result<
     // Saturating arithmetic mirrors `get_history_page`: clamp the end index to
     // the real history length so extreme `u32` inputs can never wrap into a
     // wrong slice. `end` also drives `has_more`: entries remain whenever the
-    // requested range stops short of the end of history.
+    // requested range stops short of the end of history and limit > 0.
     let end = offset.saturating_add(limit).min(total);
     if offset < total && limit != 0 {
         for i in offset..end {
             items.push_back(history.get(i).unwrap());
         }
     }
+    // When limit == 0, the page is empty by request, which signals end-of-history
+    // per the pagination policy. This ensures consistency with get_history_page.
+    let has_more = if limit == 0 { false } else { end < total };
     Ok(HistoryPage {
         items,
         total,
-        has_more: end < total,
+        has_more,
     })
 }
 
-/// Returns all history entries for a specific outage ID.
+/// Returns all history entries for a specific outage ID in chronological order (oldest-first).
+///
+/// When an outage has multiple entries across config generations (up to
+/// `MAX_RECALCS_PER_OUTAGE`), each entry carries its `config_version_hash`
+/// so consumers can match records to specific config generations. The final
+/// entry in the returned array represents the latest decision.
 pub fn get_history_by_outage(env: &Env, outage_id: Symbol) -> Result<Vec<SLAResult>, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     let history: Vec<SLAResult> = env

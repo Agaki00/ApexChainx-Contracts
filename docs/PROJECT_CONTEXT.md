@@ -295,7 +295,7 @@ used in startup probes or cache-warming pipelines.
 | `pause` / `unpause` | `admin` | Writes `PAUSED`/`PAUSEINF`, emits `paused`/`unpause`. |
 | `freeze_config` / `unfreeze_config` | `admin` | Delegates to `config_freeze`, emits `cfg_frz`/`cfg_unfrz`. |
 | `set_config` | `admin` | Validates + writes `CONFIG_KEY`, stamps `LAST_CFG_UPDATE`, emits `cfg_upd`. |
-| `set_custom_severity` / `remove_custom_severity` | `admin` | Mutates `CUSTOM_CONFIG_KEY`, emits `cfg_upd`. |
+| `set_custom_severity` / `remove_custom_severity` | `admin` | Mutates `CUSTOM_CONFIG_KEY`, emits `sev_add`/`sev_upd`/`cfg_rem`. |
 | `calculate_sla` | `operator` | Writes history, stats, telemetry; emits `sla_calc` + `set_int`. |
 | `set_retention_limit` | `admin` | Writes `RETLIM`. |
 | `prune_history` / `prune_history_by_age` | `admin` | Truncates `HIST`, emits `pruned`/`pruned_a`. |

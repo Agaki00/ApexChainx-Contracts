@@ -28,7 +28,7 @@ mod threshold_tests {
 
     use crate::{SLACalculatorContract, SLACalculatorContractClient, SLAError};
 
-    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
+    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
         env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(env, &contract_id);

@@ -39,6 +39,7 @@ pub mod config_metadata;
 pub mod contract_info;
 pub mod coordination_harness;
 pub mod cross_contract_safety;
+pub mod deployment_policy;
 pub mod error_responses;
 pub mod event;
 pub mod event_correlation;
@@ -49,9 +50,11 @@ mod event_schema;
 pub mod fuzz_spec;
 pub mod governance;
 pub mod history;
-pub mod history_snapshot;
 pub mod metadata;
 pub mod metrics;
+/// #422 – event payload-optimization helpers (consumer-side validation).
+pub mod payload_optimizer;
+pub mod policy;
 /// Parity checker: compares current `compute_result` against the locked-in
 /// canonical golden vectors in `test_snapshots/tests/parity_baseline.json`.
 /// Run with `cargo test --lib parity_tests::` or `just parity-check`.
@@ -74,7 +77,28 @@ pub mod storage_version;
 /// `ts/fixtures/contract-read-semantics.json`.
 #[cfg(test)]
 mod ts_parity_fixtures;
+/// #422 – formerly-orphan test-only modules, now declared so their guarantees
+/// (threshold boundaries, auth matrix, event ordering/stability, payload
+/// versioning, outage-id, pruning performance) are actually compiled and run.
+#[cfg(test)]
+mod auth_matrix_tests;
+#[cfg(test)]
+mod event_ordering_tests;
+#[cfg(test)]
+mod event_state_tests;
+#[cfg(test)]
+mod outage_id_tests;
+#[cfg(test)]
+mod payload_versioning_tests;
+#[cfg(test)]
+mod pruning_perf;
+#[cfg(test)]
+mod threshold_config;
+#[cfg(test)]
+mod topic_stability_tests;
 pub mod version_negotiation;
+#[cfg(test)]
+mod orphan_lint_tests;
 
 use crate::audit_state::AuditState;
 use crate::config_bundle::ConfigBundle;
@@ -197,6 +221,19 @@ pub(crate) const RESULT_SCHEMA_VERSION: u32 = 1;
 /// 6. See `docs/result-schema-migration-guard.md` for the full process.
 pub(crate) const RESULT_SCHEMA_FIELD_COUNT: u32 = 9;
 
+/// Version label of the SLAConfigSnapshot schema exposed via get_config_snapshot().
+/// Incremented/bumped when snapshot layout changes in a breaking way.
+pub(crate) const CONFIG_SNAPSHOT_SCHEMA_VERSION: Symbol = symbol_short!("v1");
+
+/// Number of named fields in `SLAConfigSnapshot`.
+///
+/// This constant is the migration guardrail for `SLAConfigSnapshot`.
+/// It must be updated in the same commit that adds or removes a field from
+/// `SLAConfigSnapshot`. The companion test `test_config_snapshot_schema_field_count_sentinel`
+/// in `schema_migration_tests.rs` will fail CI if the struct layout changes
+/// without a corresponding update to this constant and `CONFIG_SNAPSHOT_SCHEMA_VERSION`.
+pub(crate) const CONFIG_SNAPSHOT_SCHEMA_FIELD_COUNT: u32 = 2;
+
 /// Hard upper bound on retained history entries. (SC-062)
 /// Configurable down to 1 via set_retention_limit().
 pub(crate) const MAX_HISTORY_SIZE: u32 = 1000;
@@ -225,6 +262,15 @@ pub(crate) const MAX_RECALCS_PER_OUTAGE: u32 = 16;
 /// When set, overrides MAX_HISTORY_SIZE for history trimming.
 pub(crate) const RETENTION_LIMIT_KEY: Symbol = symbol_short!("RETLIM");
 
+/// Cumulative count of history entries removed by pruning (admin prune, age
+/// prune, and automatic trim in calculate_sla). Used by `get_retention_metrics`
+/// to compute retention ratio. (#461)
+pub(crate) const TOTAL_PRUNED_KEY: Symbol = symbol_short!("TPRUNED");
+
+/// Cumulative count of history entries ever stored (retained + pruned). Used
+/// by `get_retention_metrics` to compute total_entries. (#461)
+pub(crate) const TOTAL_ENTRIES_KEY: Symbol = symbol_short!("TTOTENT");
+
 /// On-chain key storing the ledger sequence of the last config update. Re-exported
 /// here so the storage-key namespace regression test catches any future collisions.
 pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
@@ -246,9 +292,16 @@ pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
 //
 // ===== Event Payload Schemas =====
 //
-// sla_calc  → (outage_id: Symbol, status: Symbol, payment_type: Symbol,
-//              rating: Symbol, mttr_minutes: u32, threshold_minutes: u32,
-//              amount: i128)
+// The three decision-carrying events (sla_calc, set_int, dup_input) share a
+// single canonical field order — the SLAResult struct order — so indexers
+// parse one layout regardless of which decision event they consume (#429):
+//
+//   decision → (outage_id, status, mttr_minutes, threshold_minutes, amount,
+//               payment_type, rating, config_version_hash, recorded_at)
+//
+// sla_calc  → (outage_id: Symbol, status: Symbol, mttr_minutes: u32,
+//              threshold_minutes: u32, amount: i128, payment_type: Symbol,
+//              rating: Symbol, config_version_hash: u64, recorded_at: u64)
 //   context: severity Symbol
 //
 // cfg_upd   → (threshold_minutes: u32, penalty_per_minute: i128,
@@ -282,6 +335,9 @@ pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
 // adm_ren   → ()
 //   context: caller Address
 //
+// adm_sup   → (superseded_admin: Address, new_admin: Address)
+//   context: caller Address
+//
 // op_prop   → (new_operator: Address,)
 //   context: caller Address
 //
@@ -291,8 +347,9 @@ pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
 // op_can    → ()
 //   context: caller Address
 //
-// set_int   → (outage_id: Symbol, status: Symbol, payment_type: Symbol,
-//              amount: i128, config_version_hash: u64, recorded_at: u64)
+// set_int   → (outage_id: Symbol, status: Symbol, mttr_minutes: u32,
+//              threshold_minutes: u32, amount: i128, payment_type: Symbol,
+//              rating: Symbol, config_version_hash: u64, recorded_at: u64)
 //   context: severity Symbol
 //
 // dup_input → (outage_id: Symbol, status: Symbol, mttr_minutes: u32,
@@ -314,8 +371,13 @@ pub(crate) const EVENT_SLA_CALC: Symbol = symbol_short!("sla_calc");
 
 /// Emitted alongside sla_calc for settlement intent reconciliation.
 ///
-/// Compatibility decision: settlement intent fields are ordered by settlement
-/// priority (id, status, payment, amount, hash, timestamp). Field additions
+/// Carries the full SLA decision (including `mttr_minutes`,
+/// `threshold_minutes`, and `rating`) so a consumer processing only the
+/// settlement stream can reconstruct the decision without a follow-up read.
+///
+/// Compatibility decision: shares the canonical decision field order
+/// (`outage_id, status, mttr_minutes, threshold_minutes, amount,
+/// payment_type, rating, config_version_hash, recorded_at`). Field additions
 /// go at the end; any reorder or removal requires a version bump.
 pub(crate) const EVENT_SETTLE_INTENT: Symbol = symbol_short!("set_int");
 
@@ -331,6 +393,23 @@ pub(crate) const EVENT_CONFIG_UPD: Symbol = symbol_short!("cfg_upd");
 /// Compatibility decision: payload is intentionally empty `()`, mirroring
 /// other removal-style events. The removed severity is carried in topic[2].
 pub(crate) const EVENT_CONFIG_REM: Symbol = symbol_short!("cfg_rem");
+
+/// Emitted when a new custom severity is registered (first creation).
+/// Distinguishable from cfg_upd by indexers: the custom severity did not
+/// exist before this call. (#456)
+///
+/// Compatibility decision: payload is `(threshold_minutes, penalty_per_minute,
+/// reward_base)` — same shape as cfg_upd. The distinct event name lets
+/// indexers separate creation from update without state inspection.
+pub(crate) const EVENT_SEV_ADD: Symbol = symbol_short!("sev_add");
+
+/// Emitted when an existing custom severity is reconfigured.
+/// Distinguishable from sev_add by indexers: the custom severity already
+/// existed before this call. (#456)
+///
+/// Compatibility decision: payload is `(threshold_minutes, penalty_per_minute,
+/// reward_base)` — same shape as cfg_upd.
+pub(crate) const EVENT_SEV_UPD: Symbol = symbol_short!("sev_upd");
 
 /// Emitted when the contract is paused by admin. (#27)
 ///
@@ -387,6 +466,13 @@ pub(crate) const EVENT_ADMIN_ACC: Symbol = symbol_short!("adm_acc");
 /// EVENT_ADMIN_ACC.
 pub(crate) const EVENT_ADMIN_CAN: Symbol = symbol_short!("adm_can");
 
+/// Emitted when a pending admin proposal is superseded by a re-proposal
+/// before the prior candidate accepted or cancelled. (#468)
+///
+/// Compatibility decision: payload is `(superseded_admin: Address,
+/// new_admin: Address)`. Additive event name; appending fields is safe.
+pub(crate) const EVENT_ADMIN_SUP: Symbol = symbol_short!("adm_sup");
+
 /// Emitted when the admin permanently renounces their role. (#65)
 ///
 /// Compatibility decision: payload is intentionally empty `()`. Renounce is
@@ -410,6 +496,13 @@ pub(crate) const EVENT_OP_ACC: Symbol = symbol_short!("op_acc");
 /// Compatibility decision: payload is intentionally empty `()`. Same rules as
 /// EVENT_ADMIN_CAN.
 pub(crate) const EVENT_OP_CAN: Symbol = symbol_short!("op_can");
+
+/// Emitted when a pending operator proposal is superseded by a re-proposal
+/// before the prior candidate accepted or cancelled. (#468)
+///
+/// Compatibility decision: payload is `(superseded_operator: Address,
+/// new_operator: Address)`. Additive event name; appending fields is safe.
+pub(crate) const EVENT_OP_SUP: Symbol = symbol_short!("op_sup");
 
 /// Emitted when the configuration is frozen by admin.
 ///
@@ -508,11 +601,26 @@ pub enum SLAError {
     /// | `outage_id` exists **and** the config version hash is **unchanged** **but** the inputs **differ** | **DuplicateOutageInput** error — the caller submitted contradictory data for the same outage under the same config |
     /// | `outage_id` exists **and** the config version hash **changed** | Treated as a **fresh calculation** — the config update invalidates the previous entry, so the new result is appended to history |
     ///
+    /// # Severity-Blind Detection
+    ///
+    /// The duplicate detection is **severity-blind**: it compares only `mttr_minutes`
+    /// and `threshold_minutes` (via the config hash), not the severity argument.
+    /// This means that if two severities have identical configuration parameters
+    /// (e.g., both high and medium configured with threshold 30 / penalty 50 / reward 750),
+    /// resubmitting the same outage under a different severity with the same MTTR is
+    /// treated as an idempotent replay, not a conflict.
+    ///
+    /// **Rationale:** The stored `SLAResult` does not carry a severity field, so
+    /// the contract cannot distinguish severity-only changes from true replays.
+    /// Adding severity to the result schema requires a breaking migration. Until
+    /// that migration is implemented, the contract treats severity as a routing
+    /// parameter rather than a data dimension for duplicate detection.
+    ///
     /// # Consumer guidance
     ///
     /// Backend callers that receive this error should:
-    /// 1. Check whether the submitted `mttr_minutes` or severity level was
-    ///    entered incorrectly (typo, stale measurement).
+    /// 1. Check whether the submitted `mttr_minutes` was entered incorrectly
+    ///    (typo, stale measurement).
     /// 2. If the previous calculation was incorrect, the admin must call
     ///    `prune_history` to remove the conflicting entry before
     ///    re-submitting with corrected values — or wait for a config
@@ -532,7 +640,7 @@ pub enum SLAError {
     InvalidRewardAmount = 15,
     /// Configuration is frozen — config changes are blocked.
     ConfigFrozen = 16,
-    /// Input parameter violates documented constraints (e.g., reason too long). (#68)
+    /// Input parameter violates documented constraints (e.g., reason too long, mttr_minutes exceeds maximum). (#68)
     InvalidInput = 17,
     /// Custom severity referenced but not registered. (#93)
     SeverityNotInSet = 18,
@@ -542,6 +650,13 @@ pub enum SLAError {
     ProposalExpired = 20,
     /// Admin authority was permanently renounced — admin-gated calls are no longer possible. (#406)
     AdminRenounced = 21,
+    /// Aggregate exposure totals overflowed i128 during summation.
+    ///
+    /// The read-only `get_economic_exposure` view sums per-severity
+    /// `max_reward` and `penalty_per_minute` values using checked arithmetic.
+    /// This error is returned when either aggregate overflows, preventing
+    /// silent capping at `i128::MAX`. (SC-W5-047 alignment)
+    ExposureOverflow = 22,
 }
 
 // -----------------------------------------------------------------------
@@ -604,8 +719,9 @@ pub struct SLAResult {
 ///
 /// The `items` slice is identical to what `get_history_page` returns for the
 /// same `(offset, limit)`; `total` is the full history length and `has_more`
-/// is `true` when the requested range ends before the end of history (i.e.
-/// more entries can be fetched by advancing `offset`).
+/// is `true` when the requested range ends before the end of history **and**
+/// `limit > 0`. When `limit == 0`, `has_more` is `false` (empty page signals
+/// end-of-history).
 #[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -615,7 +731,8 @@ pub struct HistoryPage {
     /// Total number of history entries currently stored.
     pub total: u32,
     /// Whether the requested range ends before the end of history (more
-    /// entries can be fetched by advancing `offset`).
+    /// entries can be fetched by advancing `offset`). When `limit == 0`,
+    /// this is `false` (empty page signals end-of-history).
     pub has_more: bool,
 }
 
@@ -751,7 +868,13 @@ pub struct PublicApiMethod {
     pub name: Symbol,
     /// Whether the method mutates storage (`true`) or is read-only (`false`).
     pub mutates: bool,
-    /// Auth role required: "admin", "operator", or "none".
+    /// Auth classification. Values:
+    /// - `"admin"` – caller must hold the admin role.
+    /// - `"operator"` – caller must hold the operator role.
+    /// - `"addr"` – only a specific stored address may call (the pending
+    ///   proposal slot holder must sign, e.g. `accept_admin`/`accept_operator`)
+    ///   (#426).
+    /// - `"none"` – no authorization gate (read-only / public).
     pub auth: Symbol,
     /// The primary event name emitted by this method, or `Symbol::new(env, "")` if none.
     pub event: Symbol,
@@ -1081,6 +1204,11 @@ impl SLACalculatorContract {
     /// Deploy the contract.
     /// `admin`    – may update config, pause/unpause, and assign the operator.
     /// `operator` – may call `calculate_sla`.
+    ///
+    /// # Role Distinctness & Single-Address Mode
+    /// Both `admin` and `operator` signatures are required at initialization. However, `admin` and
+    /// `operator` may be set to the same address for single-key / merged-role deployments where
+    /// role separation is not required. In this case, both authorization checks are satisfied by a single signature.
     pub fn initialize(env: Env, admin: Address, operator: Address) -> Result<(), SLAError> {
         if env.storage().instance().has(&ADMIN_KEY) {
             return Err(SLAError::AlreadyInitialized);
@@ -1148,6 +1276,11 @@ impl SLACalculatorContract {
         );
 
         env.storage().instance().set(&CONFIG_KEY, &configs);
+        // #455 – Seed CUSTOM_CONFIG_KEY so fresh and migrated contracts
+        // have the same instance-storage key layout.
+        env.storage()
+            .instance()
+            .set(&CUSTOM_CONFIG_KEY, &Map::<Symbol, SLAConfig>::new(&env));
         Self::write_version(&env);
         Ok(())
     }
@@ -1359,8 +1492,13 @@ impl SLACalculatorContract {
     // #28 – Operator management (admin only)
     // -------------------------------------------------------------------
 
-    /// Replace the operator address (admin only).
-    /// Emits an `op_set` event.
+    /// Replace the operator address directly (single-step, admin only).
+    ///
+    /// This is the legacy break-glass path. It does **not** require the new
+    /// operator's consent — only the admin authorizes the change. Emits an
+    /// `op_set` event (distinguishable from the two-step `op_prop`/`op_acc`
+    /// trail). For routine rotations, prefer `propose_operator` +
+    /// `accept_operator`.
     pub fn set_operator(env: Env, caller: Address, new_operator: Address) -> Result<(), SLAError> {
         governance::set_operator(&env, &caller, &new_operator)
     }
@@ -1397,7 +1535,10 @@ impl SLACalculatorContract {
         storage_estimation::get_storage_footprint_estimate(&env)
     }
 
-    /// Returns the estimated per-ledger rent cost in stroops based on storage footprint.
+    /// Returns an approximate per-ledger rent cost in stroops based on storage footprint.
+    ///
+    /// **Note (#459):** This is a relative growth proxy, not an authoritative
+    /// rent figure. See `storage_estimation::get_rent_estimate` for details.
     pub fn get_rent_estimate(env: Env) -> Result<i128, SLAError> {
         storage_estimation::get_rent_estimate(&env)
     }
@@ -1406,12 +1547,16 @@ impl SLACalculatorContract {
     // #64 – Two-step operator handoff
     // -------------------------------------------------------------------
 
-    /// Propose a new operator. The current admin initiates; the new operator must call `accept_operator`.
+    /// Propose a new operator (step 1 of the canonical two-step handoff).
+    /// The current admin initiates; the new operator must call `accept_operator`
+    /// to consent and complete the transfer. Emits `op_prop`.
     pub fn propose_operator(env: Env, caller: Address, new_operator: Address) -> Result<(), SLAError> {
         governance::propose_operator(&env, &caller, &new_operator)
     }
 
-    /// Accept a pending operator handoff. Must be called by the proposed new operator.
+    /// Accept a pending operator handoff (step 2 of the canonical two-step handoff).
+    /// Must be called by the proposed new operator, requiring their explicit consent.
+    /// Emits `op_acc`.
     pub fn accept_operator(env: Env, caller: Address) -> Result<(), SLAError> {
         governance::accept_operator(&env, &caller)
     }
@@ -1546,6 +1691,10 @@ impl SLACalculatorContract {
         // so higher-severity penalties are never lower than lower-severity ones.
         Self::validate_cross_severity_penalty_ordering(&env, &severity, penalty_per_minute)?;
 
+        // Cross-severity threshold ordering: enforce that critical <= high <= medium <= low
+        // so that more severe outages always have shorter response windows.
+        Self::validate_cross_severity_threshold_ordering(&env, &severity, threshold_minutes)?;
+
         let mut configs: Map<Symbol, SLAConfig> = env
             .storage()
             .instance()
@@ -1620,6 +1769,12 @@ impl SLACalculatorContract {
             .get(&CUSTOM_CONFIG_KEY)
             .unwrap_or_else(|| Map::new(&env));
 
+        // #456 – Determine whether this is a first registration or a
+        // reconfiguration so the emitted event distinguishes the two
+        // lifecycle transitions. Indexers reconstructing the custom-severity
+        // set from events need this to tell "who added" from "who changed".
+        let is_update = custom.contains_key(severity.clone());
+
         custom.set(
             severity.clone(),
             SLAConfig {
@@ -1634,8 +1789,18 @@ impl SLACalculatorContract {
         // #408 – record the config snapshot under its new version hash.
         Self::record_config_registry(&env)?;
 
+        // Emit the lifecycle-appropriate event: sev_add for first
+        // registration, sev_upd for reconfiguration. The payload shape
+        // is identical (threshold, penalty, reward) so consumers that only
+        // care about values can parse either; consumers that need the
+        // lifecycle distinction check topic[0].
+        let event_name = if is_update {
+            EVENT_SEV_UPD
+        } else {
+            EVENT_SEV_ADD
+        };
         env.events().publish(
-            (EVENT_CONFIG_UPD, EVENT_VERSION, severity),
+            (event_name, EVENT_VERSION, severity),
             (threshold_minutes, penalty_per_minute, reward_base),
         );
         Ok(())
@@ -1697,7 +1862,7 @@ impl SLACalculatorContract {
         }
 
         Ok(SLAConfigSnapshot {
-            version: symbol_short!("v1"),
+            version: CONFIG_SNAPSHOT_SCHEMA_VERSION,
             entries,
         })
     }
@@ -1732,18 +1897,7 @@ impl SLACalculatorContract {
     /// Returns a deterministic backend-friendly snapshot of all config values.
     pub fn get_config_snapshot(env: Env) -> Result<SLAConfigSnapshot, SLAError> {
         Self::check_version(&env)?;
-
-        let mut entries = Vec::new(&env);
-
-        for severity in Self::canonical_severities(&env) {
-            let config = Self::load_config(&env, &severity)?;
-            entries.push_back(SLAConfigEntry { severity, config });
-        }
-
-        Ok(SLAConfigSnapshot {
-            version: symbol_short!("v1"),
-            entries,
-        })
+        Self::build_config_snapshot(&env)
     }
 
     /// Returns the config snapshot recorded for a given version hash, if any. (#408)
@@ -1777,13 +1931,20 @@ impl SLACalculatorContract {
 
     /// Builds the canonical config snapshot (canonical severities only). (#408)
     fn build_config_snapshot(env: &Env) -> Result<SLAConfigSnapshot, SLAError> {
+        let configs: Map<Symbol, SLAConfig> = env
+            .storage()
+            .instance()
+            .get(&CONFIG_KEY)
+            .ok_or(SLAError::NotInitialized)?;
+
         let mut entries = Vec::new(env);
         for severity in Self::canonical_severities(env) {
-            let config = Self::load_config(env, &severity)?;
+            let config = configs.get(severity.clone()).ok_or(SLAError::ConfigNotFound)?;
             entries.push_back(SLAConfigEntry { severity, config });
         }
+
         Ok(SLAConfigSnapshot {
-            version: symbol_short!("v1"),
+            version: CONFIG_SNAPSHOT_SCHEMA_VERSION,
             entries,
         })
     }
@@ -1817,7 +1978,7 @@ impl SLACalculatorContract {
 
         // Emit in numeric order for deterministic consumption
         // All descriptions must be <= 32 bytes (Soroban Symbol constraint)
-        let entries: [(u32, &str, &str); 21] = [
+        let entries: [(u32, &str, &str); 22] = [
             (1, "AlreadyInitialized", "Contract already initialized"),
             (2, "NotInitialized", "Contract not yet initialized"),
             (3, "Unauthorized", "Caller lacks required role"),
@@ -1839,6 +2000,7 @@ impl SLACalculatorContract {
             (19, "OutageRecalcLimit", "Outage recalc limit reached"),
             (20, "ProposalExpired", "Proposal expired"),
             (21, "AdminRenounced", "Admin authority renounced"),
+            (22, "ExposureOverflow", "Exposure totals overflow i128"),
         ];
 
         for (code, label, description) in entries {
@@ -1891,26 +2053,63 @@ impl SLACalculatorContract {
     /// contract is initialised and on the current storage version.
     pub fn get_config_bundle(env: Env) -> Result<Option<ConfigBundle>, SLAError> {
         let snapshot = Self::get_config_snapshot(env.clone())?;
-        let schema = Self::get_result_schema(env)?;
-        Ok(Some(ConfigBundle { snapshot, schema }))
+        let schema = Self::get_result_schema(env.clone())?;
+        let config_version_hash = Self::compute_config_version_hash(&env)?;
+        Ok(Some(ConfigBundle {
+            snapshot,
+            schema,
+            config_version_hash,
+        }))
     }
 
     /// Returns the full audit state including roles, config, stats, and history.
+    ///
+    /// Performs a single version check and direct single-pass storage key reads
+    /// (admin, operator, pending slots, pause state/info, configs, stats, history len)
+    /// to eliminate redundant delegated version checks and storage key deserializations.
     pub fn get_full_audit_state(env: Env) -> Result<AuditState, SLAError> {
         Self::check_version(&env)?;
 
-        let admin = Self::get_admin(env.clone())?;
-        let operator = Self::get_operator(env.clone())?;
-        let pending_admin = Self::get_pending_admin(env.clone())?;
-        let pending_operator = Self::get_pending_operator(env.clone())?;
-        let paused = Self::is_paused(env.clone())?;
-        let pause_info = Self::get_pause_info(env.clone())?;
-        let config_snapshot = Self::get_config_snapshot(env.clone())?;
-        let stats = Self::get_stats(env.clone())?;
-        let result_schema = Self::get_result_schema(env.clone())?;
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&ADMIN_KEY)
+            .ok_or(SLAError::NotInitialized)?;
+        let operator: Address = env
+            .storage()
+            .instance()
+            .get(&OPERATOR_KEY)
+            .ok_or(SLAError::NotInitialized)?;
+        let pending_admin: Option<Address> = env.storage().instance().get(&PENDING_ADMIN_KEY);
+        let pending_operator: Option<Address> = env.storage().instance().get(&PENDING_OP_KEY);
+        let paused: bool = env.storage().instance().get(&PAUSED_KEY).unwrap_or(false);
+        let pause_info: Option<PauseInfo> = env.storage().instance().get(&PAUSE_INFO_KEY);
+        let config_snapshot = Self::build_config_snapshot(&env)?;
+        let stats: SLAStats = env
+            .storage()
+            .instance()
+            .get(&STATS_KEY)
+            .ok_or(SLAError::NotInitialized)?;
 
         // Issue #463: use cached history length instead of materializing full vector
         let history_len: u32 = env.storage().instance().get(&HISTORY_LEN_KEY).unwrap_or(0);
+
+        let result_schema = SLAResultSchema {
+            version: symbol_short!("v1"),
+            schema_version: RESULT_SCHEMA_VERSION,
+            result_field_count: RESULT_SCHEMA_FIELD_COUNT,
+            status_met: symbol_short!("met"),
+            status_violated: symbol_short!("viol"),
+            payment_reward: symbol_short!("rew"),
+            payment_penalty: symbol_short!("pen"),
+            rating_exceptional: symbol_short!("top"),
+            rating_excellent: symbol_short!("excel"),
+            rating_good: symbol_short!("good"),
+            rating_poor: symbol_short!("poor"),
+            includes_config_version_hash: true,
+            deprecated_symbols: Vec::new(&env),
+            severity_aliases: Vec::new(&env),
+        };
 
         Ok(AuditState {
             admin,
@@ -1937,17 +2136,12 @@ impl SLACalculatorContract {
         Self::check_version(&env)?;
         let severities = Self::canonical_severities(&env);
 
+        // #424 – feature list derived from the single shared source so this
+        // legacy endpoint can never disagree with get_contract_info.
         let mut features = Vec::new(&env);
-        features.push_back(symbol_short!("calc"));
-        features.push_back(symbol_short!("audit"));
-        features.push_back(symbol_short!("pause"));
-        features.push_back(symbol_short!("stats"));
-        features.push_back(symbol_short!("history"));
-        features.push_back(symbol_short!("failcode"));
-        features.push_back(symbol_short!("safe_call"));
-        features.push_back(symbol_short!("ver_nego"));
-        features.push_back(symbol_short!("corr_id"));
-        features.push_back(symbol_short!("freeze"));
+        for f in crate::contract_info::CONTRACT_FEATURES.iter() {
+            features.push_back(Symbol::new(&env, f));
+        }
 
         Ok(ContractMetadata {
             contract_name: symbol_short!("sla_calc"),
@@ -2000,7 +2194,9 @@ impl SLACalculatorContract {
     /// Each `PublicApiMethod` contains:
     /// - `name`: the contract method name (e.g. "calculate_sla")
     /// - `mutates`: `true` if the method modifies storage
-    /// - `auth`: auth role required — "admin", "operator", or "none"
+    /// - `auth`: auth classification — `"admin"`, `"operator"`, `"addr"`
+    ///   (a specific pending address, e.g. `accept_admin`/`accept_operator`),
+    ///   or `"none"`.
     /// - `event`: the primary event name emitted, or empty if none
     ///
     /// # Errors
@@ -2039,10 +2235,12 @@ impl SLACalculatorContract {
         // All public methods added in alphabetical order for deterministic output.
         // Lifecycle:
         // Note: accept_admin/accept_operator are called by the proposed address
-        // (not the current role holder), so auth is "none" — only an address
-        // equality check against the pending slot is performed.
-        methods.push_back(method("accept_admin", true, "none", "adm_acc"));
-        methods.push_back(method("accept_operator", true, "none", "op_acc"));
+        // (not the current role holder). They still call `caller.require_auth()`
+        // and enforce that the caller equals the pending address, so they are
+        // NOT "none" — they are address-scoped ("addr"— the pending slot holder
+        // must sign) (#426).
+        methods.push_back(method("accept_admin", true, "addr", "adm_acc"));
+        methods.push_back(method("accept_operator", true, "addr", "op_acc"));
         // Calculation:
         methods.push_back(method("calculate_sla", true, "operator", "sla_calc"));
         methods.push_back(method("calculate_sla_view", false, "none", ""));
@@ -2079,15 +2277,20 @@ impl SLACalculatorContract {
         methods.push_back(method("get_rent_estimate", false, "none", ""));
         methods.push_back(method("get_result_schema", false, "none", ""));
         methods.push_back(method("get_retention_limit", false, "none", ""));
+        methods.push_back(method("get_retention_metrics", false, "none", ""));
         methods.push_back(method("get_severity_telemetry", false, "none", ""));
         methods.push_back(method("get_stats", false, "none", ""));
         methods.push_back(method("get_storage_footprint_estimate", false, "none", ""));
         methods.push_back(method("get_storage_version", false, "none", ""));
         methods.push_back(method("get_version_info", false, "none", ""));
+        methods.push_back(method("get_version_negotiation_info", false, "none", ""));
         // Health:
         methods.push_back(method("healthcheck", false, "none", ""));
         // Init:
-        methods.push_back(method("initialize", true, "admin", ""));
+        // initialize requires BOTH the admin and the operator address to
+        // authorize (admin.require_auth(); operator.require_auth();) — not
+        // single-party "admin" (#425).
+        methods.push_back(method("initialize", true, "multi", ""));
         methods.push_back(method("is_config_frozen", false, "none", ""));
         methods.push_back(method("is_paused", false, "none", ""));
         // Config queries:
@@ -2100,12 +2303,12 @@ impl SLACalculatorContract {
         methods.push_back(method("propose_operator", true, "admin", "op_prop"));
         methods.push_back(method("prune_history", true, "admin", "pruned"));
         methods.push_back(method("prune_history_by_age", true, "admin", "pruned_a"));
-        methods.push_back(method("remove_custom_severity", true, "admin", "cfg_upd"));
+        methods.push_back(method("remove_custom_severity", true, "admin", "cfg_rem"));
         methods.push_back(method("renounce_admin", true, "admin", "adm_ren"));
         methods.push_back(method("replay_calculate_sla", true, "operator", "sla_calc"));
         // Setters:
         methods.push_back(method("set_config", true, "admin", "cfg_upd"));
-        methods.push_back(method("set_custom_severity", true, "admin", "cfg_upd"));
+        methods.push_back(method("set_custom_severity", true, "admin", "sev_add"));
         methods.push_back(method("set_operator", true, "admin", "op_set"));
         methods.push_back(method("set_retention_limit", true, "admin", ""));
         methods.push_back(method("unfreeze_config", true, "admin", "cfg_unfrz"));
@@ -2123,6 +2326,12 @@ impl SLACalculatorContract {
     // -------------------------------------------------------------------
 
     /// Returns the cumulative SLA performance statistics.
+    ///
+    /// This is the contract's dashboard aggregate: together with
+    /// `get_severity_telemetry` (per-severity weekly windows) it is the
+    /// supported surface for dashboard telemetry. Cumulative totals here
+    /// subsume the windowed view; consumers that need a windowed summary
+    /// should read `get_severity_telemetry` rather than re-scan history.
     pub fn get_stats(env: Env) -> Result<SLAStats, SLAError> {
         Self::check_version(&env)?;
         env.storage()
@@ -2145,6 +2354,17 @@ impl SLACalculatorContract {
     /// The top-tier reward multiplier (200 %) is applied to `reward_base` to
     /// yield `max_reward` — matching the `compute_result` path for
     /// `performance_ratio < 50`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SLAError::ExposureOverflow`] if any aggregate total
+    /// overflows `i128` during summation. With the current validation bounds
+    /// (`reward_base ≤ 100 000`, `penalty_per_minute ≤ 10 000`, 4 canonical
+    /// severities) the maximum totals are `800 000` and `40 000` respectively,
+    /// so this error is unreachable today. Checked arithmetic is used
+    /// regardless for correctness-by-construction: a future bound relaxation
+    /// or custom-severity expansion will produce a clear error instead of
+    /// silently capping totals at `i128::MAX`. (SC-W5-047)
     pub fn get_economic_exposure(env: Env) -> Result<EconomicExposure, SLAError> {
         Self::check_version(&env)?;
 
@@ -2161,12 +2381,16 @@ impl SLACalculatorContract {
                 .reward_base
                 .checked_mul(200)
                 .map(|v| v.div_euclid(100))
-                .unwrap_or(i128::MAX);
+                .ok_or(SLAError::ExposureOverflow)?;
 
             let penalty_rate = cfg.penalty_per_minute;
 
-            total_max_reward = total_max_reward.saturating_add(max_reward);
-            total_penalty_per_minute = total_penalty_per_minute.saturating_add(penalty_rate);
+            total_max_reward = total_max_reward
+                .checked_add(max_reward)
+                .ok_or(SLAError::ExposureOverflow)?;
+            total_penalty_per_minute = total_penalty_per_minute
+                .checked_add(penalty_rate)
+                .ok_or(SLAError::ExposureOverflow)?;
 
             breakdown.push_back(SeverityExposure {
                 severity,
@@ -2250,6 +2474,10 @@ impl SLACalculatorContract {
 
     /// Recalculates SLA deterministically without mutating any state or emitting events.
     /// Can be called by anyone for verification and audit purposes.
+    ///
+    /// # Input constraints
+    ///
+    /// - `mttr_minutes` must be ≤ 525,600 (365 days). Values exceeding this bound are rejected with `InvalidInput`.
     pub fn calculate_sla_view(
         env: Env,
         outage_id: Symbol,
@@ -2261,11 +2489,29 @@ impl SLACalculatorContract {
         let cfg = Self::load_config(&env, &severity)?;
         let config_version_hash = Self::compute_config_version_hash(&env)?;
 
-        // Delegate to pure internal math without mutating state or emitting events.
+        // Apply duplicate/replay policy read-only against recorded history
+        let history: Vec<SLAResult> = env
+            .storage()
+            .instance()
+            .get(&HISTORY_KEY)
+            .unwrap_or_else(|| Vec::new(&env));
 
-        // Use the current ledger timestamp so the view result matches the mutating
-        // path for the same inputs executed in the same ledger, while still avoiding
-        // any state writes or event emission.
+        let mut existing: Option<SLAResult> = None;
+        for i in 0..history.len() {
+            let entry = history.get(i).unwrap();
+            if entry.outage_id == outage_id {
+                existing = Some(entry);
+            }
+        }
+        if let Some(prev) = existing {
+            if prev.config_version_hash == config_version_hash {
+                if prev.mttr_minutes != mttr_minutes || prev.threshold_minutes != cfg.threshold_minutes {
+                    return Err(SLAError::DuplicateOutageInput);
+                }
+                return Ok(prev);
+            }
+        }
+
         Self::compute_result(
             outage_id,
             mttr_minutes,
@@ -2340,9 +2586,14 @@ impl SLACalculatorContract {
     /// | `Unauthorized` | Caller is not the operator |
     /// | `ConfigNotFound` | No configuration exists for the requested severity |
     /// | `DuplicateOutageInput` | Same `outage_id` submitted with conflicting inputs; emits a `dup_input` event carrying the stored result |
+    /// | `InvalidInput` | Input parameter violates documented constraints (e.g., mttr_minutes exceeds maximum allowed) |
     /// | `InvalidPenaltyAmount` | Penalty computation overflowed or produced a non-negative value |
     /// | `InvalidRewardAmount` | Reward computation overflowed or produced a non-positive value |
     /// Records an SLA decision for `outage_id`. Operator only.
+    ///
+    /// # Input constraints
+    ///
+    /// - `mttr_minutes` must be ≤ 525,600 (365 days). Values exceeding this bound are rejected with `InvalidInput`.
     ///
     /// # Repeated submissions for the same outage_id
     ///
@@ -2637,42 +2888,27 @@ impl SLACalculatorContract {
         if reward_base <= 0 || reward_base > 100000 {
             return Err(SLAError::InvalidReward);
         }
-        // Cross-parameter consistency: rewards must materially exceed penalties.
-        // penalty_per_minute * 1.5 < reward_base  →  penalty * 3 < reward_base * 2
-        if penalty_per_minute.checked_mul(3).ok_or(SLAError::InvalidReward)?
-            >= reward_base.checked_mul(2).ok_or(SLAError::InvalidReward)?
-        {
-            return Err(SLAError::InvalidReward);
-        }
         Ok(())
     }
 
     /// #70 – Validates configuration parameters to ensure safe and meaningful values.
+    ///
+    /// Delegates the shared baseline checks (range, positivity, cross-parameter
+    /// consistency) to [`validate_general_bounds`] so canonical and custom
+    /// severity paths share a single source of truth.
     pub(crate) fn validate_config(
         severity: &Symbol,
         threshold_minutes: u32,
         penalty_per_minute: i128,
         reward_base: i128,
     ) -> Result<(), SLAError> {
-        // Validate severity is one of the supported values
+        // Validate severity is one of the canonical values
         if !Self::is_canonical_severity(severity) {
             return Err(SLAError::InvalidSeverity);
         }
 
-        // Threshold must be between 1 and 1440 minutes (24 hours max)
-        if threshold_minutes == 0 || threshold_minutes > 1440 {
-            return Err(SLAError::InvalidThreshold);
-        }
-
-        // Penalty must be positive and reasonable (1 to 10000 per minute)
-        if penalty_per_minute <= 0 || penalty_per_minute > 10000 {
-            return Err(SLAError::InvalidPenalty);
-        }
-
-        // Reward base must be positive and reasonable (1 to 100000)
-        if reward_base <= 0 || reward_base > 100000 {
-            return Err(SLAError::InvalidReward);
-        }
+        // Shared baseline: range checks + cross-parameter consistency
+        Self::validate_general_bounds(threshold_minutes, penalty_per_minute, reward_base)?;
 
         // Severity-specific validation to ensure logical consistency
         if *severity == symbol_short!("critical") {
@@ -2704,14 +2940,10 @@ impl SLACalculatorContract {
             if penalty_per_minute > 100 {
                 return Err(SLAError::InvalidPenalty);
             }
-        } else {
-            return Err(SLAError::InvalidSeverity);
         }
 
         // Cross-parameter consistency: rewards must materially exceed penalties.
         // penalty_per_minute * 1.5 < reward_base  →  penalty * 3 < reward_base * 2
-        // This ensures meeting SLA targets is always financially better than
-        // paying penalties for minor threshold overruns.
         if penalty_per_minute.checked_mul(3).ok_or(SLAError::InvalidReward)?
             >= reward_base.checked_mul(2).ok_or(SLAError::InvalidReward)?
         {
@@ -2811,6 +3043,59 @@ impl SLACalculatorContract {
             if let Some(higher_cfg) = configs.get(higher_sev.clone()) {
                 if new_penalty > higher_cfg.penalty_per_minute {
                     return Err(SLAError::InvalidPenalty);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Cross-severity threshold ordering validation.
+    ///
+    /// Ensures that more-severe tiers have shorter thresholds than less-severe
+    /// ones, preserving the documented progression:
+    ///   critical.threshold <= high.threshold <= medium.threshold <= low.threshold
+    ///
+    /// This prevents configurations where a low-severity outage would violate
+    /// faster than a critical-severity one (e.g. low threshold < critical threshold),
+    /// which would invert the severity model's meaning for operators.
+    ///
+    /// The check is symmetrical to `validate_cross_severity_penalty_ordering`:
+    /// it compares the new threshold against adjacent canonical severities.
+    pub(crate) fn validate_cross_severity_threshold_ordering(
+        env: &Env,
+        updated_severity: &Symbol,
+        new_threshold: u32,
+    ) -> Result<(), SLAError> {
+        let configs: Map<Symbol, SLAConfig> = env
+            .storage()
+            .instance()
+            .get(&CONFIG_KEY)
+            .ok_or(SLAError::NotInitialized)?;
+
+        let index = Self::canonical_severity_index(updated_severity).ok_or(SLAError::InvalidSeverity)?;
+        let severities = Self::canonical_severities(env);
+
+        // Check against the next-lower severity (if any):
+        //   this severity's threshold <= next-lower severity's threshold
+        // (critical <= high <= medium <= low)
+        if index + 1 < severities.len() {
+            let lower_sev = severities.get(index + 1).ok_or(SLAError::InvalidSeverity)?;
+            if let Some(lower_cfg) = configs.get(lower_sev.clone()) {
+                if new_threshold > lower_cfg.threshold_minutes {
+                    return Err(SLAError::InvalidThreshold);
+                }
+            }
+        }
+
+        // Check against the next-higher severity (if any):
+        //   this severity's threshold >= next-higher severity's threshold
+        // Only enforced for high, medium, low (index 1..=3).
+        if (1..=3).contains(&index) {
+            let higher_sev = severities.get(index - 1).ok_or(SLAError::InvalidSeverity)?;
+            if let Some(higher_cfg) = configs.get(higher_sev.clone()) {
+                if new_threshold < higher_cfg.threshold_minutes {
+                    return Err(SLAError::InvalidThreshold);
                 }
             }
         }
@@ -2975,8 +3260,10 @@ impl SLACalculatorContract {
         let last_violation = Self::count_lane(last_violations, index) as u64;
         let calc_stale = last_calc != 0 && now.saturating_sub(last_calc) >= week_seconds;
         let violation_stale = last_violation != 0 && now.saturating_sub(last_violation) >= week_seconds;
-        if calc_stale || violation_stale {
+        if calc_stale {
             calculations = Self::set_count_lane(calculations, index, 0);
+        }
+        if violation_stale {
             violations = Self::set_count_lane(violations, index, 0);
         }
 
@@ -3018,28 +3305,38 @@ impl SLACalculatorContract {
     }
 
     fn publish_sla_event(env: &Env, severity: Symbol, result: &SLAResult) {
+        // Canonical decision field order (#429): shares the SLAResult struct
+        // order with set_int and dup_input so indexers parse one layout.
         env.events().publish(
             (EVENT_SLA_CALC, EVENT_VERSION, severity),
             (
                 result.outage_id.clone(),
                 result.status.clone(),
-                result.payment_type.clone(),
-                result.rating.clone(),
                 result.mttr_minutes,
                 result.threshold_minutes,
                 result.amount,
+                result.payment_type.clone(),
+                result.rating.clone(),
+                result.config_version_hash,
+                result.recorded_at,
             ),
         );
     }
 
     fn publish_settlement_intent_event(env: &Env, severity: Symbol, result: &SLAResult) {
+        // Canonical decision field order (#429) carrying the full decision
+        // (mttr_minutes, threshold_minutes, rating) so a settlement-only
+        // consumer can reconstruct the SLA decision (#428).
         env.events().publish(
             (EVENT_SETTLE_INTENT, EVENT_VERSION, severity),
             (
                 result.outage_id.clone(),
                 result.status.clone(),
-                result.payment_type.clone(),
+                result.mttr_minutes,
+                result.threshold_minutes,
                 result.amount,
+                result.payment_type.clone(),
+                result.rating.clone(),
                 result.config_version_hash,
                 result.recorded_at,
             ),
@@ -3122,6 +3419,9 @@ impl SLACalculatorContract {
         Self::require_admin(&env, &caller)?;
 
         let now = env.ledger().timestamp();
+        if min_age_seconds >= now {
+            return Err(SLAError::InvalidInput);
+        }
         let cutoff = now.saturating_sub(min_age_seconds);
 
         let history: Vec<SLAResult> = env
@@ -3201,7 +3501,8 @@ impl SLACalculatorContract {
     /// `items` slice is identical to what `get_history_page` returns for the
     /// same `(offset, limit)`; `total` is the full history length and
     /// `has_more` is `true` when the requested range ends before the end of
-    /// history.
+    /// history **and** `limit > 0`. When `limit == 0`, `has_more` is `false` to
+    /// signal end-of-history (empty page).
     ///
     /// Pagination semantics (offset-based, oldest-first, saturating
     /// `offset + limit`, empty page when `offset >= len` or `limit == 0`) are
@@ -3219,7 +3520,7 @@ impl SLACalculatorContract {
         Ok(HistoryPage {
             items,
             total,
-            has_more: end < total,
+            has_more,
         })
     }
 
@@ -3227,8 +3528,13 @@ impl SLACalculatorContract {
     // SC-060: History query by outage identifier
     // -------------------------------------------------------------------
 
-    /// Returns all history entries whose `outage_id` matches the given value.
-    /// Returns an empty Vec when no matching entries exist.
+    /// Returns all history entries whose `outage_id` matches the given value in
+    /// chronological order (oldest-first).
+    ///
+    /// When an outage has multiple entries across config generations (up to
+    /// `MAX_RECALCS_PER_OUTAGE`), each entry carries its `config_version_hash`
+    /// so consumers can match records to specific config generations. The final
+    /// entry in the returned array represents the latest decision.
     pub fn get_history_by_outage(env: Env, outage_id: Symbol) -> Result<Vec<SLAResult>, SLAError> {
         Self::check_version(&env)?;
         let history: Vec<SLAResult> = env
@@ -3452,6 +3758,45 @@ impl SLACalculatorContract {
     }
 
     // -------------------------------------------------------------------
+    // SC-W5-078 – Version negotiation endpoint for multi-contract handshake
+    // -------------------------------------------------------------------
+
+    /// Returns the `VersionNegotiationInfo` for this contract, exposing the
+    /// version-negotiation protocol data (`protocol_version`,
+    /// `min_compatible_protocol`, storage version, pause & migration state)
+    /// over a live contract method.
+    ///
+    /// This makes the multi-contract handshake documented in
+    /// `version_negotiation.rs` and `docs/VERSION_NEGOTIATION_CONTRIBUTOR_GUIDE.md`
+    /// actually runnable: a coordinator/backend calls this on each peer to
+    /// obtain the `protocol_version`/`min_compatible_protocol` it needs to
+    /// feed `negotiate_contract_versions` off-chain (or via a cross-contract
+    /// coordinator), instead of the data living only in dead code (#427).
+    ///
+    /// Like `get_version_info`, this intentionally bypasses `check_version`
+    /// so it remains callable even in a pre-migration or pre-init state.
+    ///
+    /// # Returns
+    /// The `VersionNegotiationInfo` for this contract (empty peers: a
+    /// coordinator can then run the negotiation rules against a peer list it
+    /// assembles from these responses).
+    pub fn get_version_negotiation_info(
+        env: Env,
+    ) -> Result<crate::version_negotiation::VersionNegotiationInfo, SLAError> {
+        let stored_version: u32 = env
+            .storage()
+            .instance()
+            .get(&STORAGE_VERSION_KEY)
+            .ok_or(SLAError::NotInitialized)?;
+        let is_paused: bool = env.storage().instance().get(&PAUSED_KEY).unwrap_or(false);
+        Ok(crate::version_negotiation::build_negotiation_info(
+            stored_version,
+            STORAGE_VERSION,
+            is_paused,
+        ))
+    }
+
+    // -------------------------------------------------------------------
     // #218 – Read-only healthcheck path for backend startup readiness
     // -------------------------------------------------------------------
 
@@ -3466,12 +3811,39 @@ impl SLACalculatorContract {
     /// This function intentionally bypasses `check_version` (like
     /// `get_version_info` and `get_migration_state`) so it remains callable
     /// even when the contract is in a pre-migration or pre-init state.
+    ///
+    /// # Readiness Definition
+    ///
+    /// The healthcheck returns `ready: true` only when the contract is:
+    /// - Initialized (storage version matches expected version)
+    /// - Has an admin (not permanently renounced)
+    ///
+    /// This definition focuses on operational readiness for governance functions.
+    /// Pause/freeze states are not included in the readiness check to keep the
+    /// probe simple; operators should use `get_contract_state_fingerprint` for
+    /// full state visibility.
+    ///
+    /// # Status Vocabulary
+    ///
+    /// - `noinit`: Contract has never been initialized
+    /// - `migrate`: Storage version mismatch, migration required
+    /// - `noadmin`: Admin has been permanently renounced (governance-dead)
+    /// - `ok`: Contract is operational and has an admin
     pub fn healthcheck(env: Env) -> HealthcheckResult {
         let stored_version: Option<u32> = env.storage().instance().get(&STORAGE_VERSION_KEY);
+        let admin_renounced: Option<bool> = env.storage().instance().get(&ADMIN_RENOUNCED_KEY);
+
         let (ready, status) = match stored_version {
             None => (false, symbol_short!("noinit")),
             Some(v) if v != STORAGE_VERSION => (false, symbol_short!("migrate")),
-            Some(_) => (true, symbol_short!("ok")),
+            Some(_) => {
+                // Check if admin has been permanently renounced
+                if admin_renounced == Some(true) {
+                    (false, symbol_short!("noadmin"))
+                } else {
+                    (true, symbol_short!("ok"))
+                }
+            }
         };
         HealthcheckResult {
             ready,
@@ -3517,8 +3889,19 @@ impl SLACalculatorContract {
     /// # Errors
     ///
     /// Returns `NotInitialized` if the contract has never been initialized (no
-    /// `STORAGE_VERSION_KEY` present). All other contract states return a valid
-    /// fingerprint, including pre-migration and paused states.
+    /// `STORAGE_VERSION_KEY` present).
+    ///
+    /// Returns `NotInitialized` or `ConfigNotFound` when the configuration is
+    /// unreadable (e.g. `CONFIG_KEY` is missing or a canonical severity is absent
+    /// from the stored map). This is deliberate (#494): a corrupt config must not
+    /// be reported as a valid fingerprint with a bogus `config_version_hash` of
+    /// `0` — an operator comparing pre/post-upgrade fingerprints would otherwise
+    /// be unable to tell a corrupt config from a merely different one. The
+    /// endpoint's audit purpose (release review, upgrade planning, incident
+    /// response) requires the unreadable-config case to surface as an error.
+    ///
+    /// All *readable* contract states return a valid fingerprint, including
+    /// pre-migration and paused states.
     ///
     /// # Safety
     ///
@@ -3538,9 +3921,12 @@ impl SLACalculatorContract {
         let needs_migration = stored_version != STORAGE_VERSION;
 
         // Config version hash computation is safe even in pre-migration state
-        // because load_config works across all initialized states.
-        // If config is unreadable, fall back to sentinel 0.
-        let config_version_hash: u64 = Self::compute_config_version_hash(&env).unwrap_or(0);
+        // because load_config works across all initialized states. An unreadable
+        // config (missing CONFIG_KEY, or a canonical severity absent from the
+        // map) is propagated as an error rather than masked with a sentinel 0:
+        // a legitimate hash is never 0, so 0 would be indistinguishable from a
+        // corrupt config (see #494).
+        let config_version_hash: u64 = Self::compute_config_version_hash(&env)?;
 
         // Pause and freeze state default to false if keys are absent.
         let is_paused: bool = env.storage().instance().get(&PAUSED_KEY).unwrap_or(false);

@@ -22,8 +22,12 @@ pub struct AuditState {
     pub pending_operator: Option<Address>,
     /// Whether the contract is currently paused.
     pub paused: bool,
-    /// Empty when unpaused, single-element when paused. A `Vec` stands in for
-    /// `Option` because `#[contracttype]` cannot convert `Option<PauseInfo>`.
+    /// Pause metadata when paused, empty otherwise. Follows the crate-wide
+    /// optional-state convention for `#[contracttype]` fields (CODING_STYLE.md
+    /// Part 3, #493): `Option<T>` cannot be a `#[contracttype]` field, so a
+    /// `Vec<T>` stands in with a max-length invariant — empty = absent,
+    /// single-element = present. INVARIANT: `pause_info.len() <= 1`; the
+    /// getter surfaces (`get_pause_info`) use `Option<PauseInfo>` directly.
     pub pause_info: Vec<PauseInfo>,
     /// Ordered snapshot of all severity configurations.
     pub config_snapshot: SLAConfigSnapshot,
@@ -85,5 +89,35 @@ mod tests {
         let state = client.get_full_audit_state();
         assert_eq!(state.history_len, 2);
         assert_eq!(state.stats.total_calculations, 2);
+    }
+
+    // #493 – the pause_info Vec-stands-in-for-Option invariant: empty when
+    // unpaused, exactly one element when paused, and always consistent with
+    // the Option-typed getter surface.
+    #[test]
+    fn test_audit_state_pause_info_invariant_across_pause_cycle() {
+        let (env, client, admin, _operator) = setup();
+
+        // Unpaused: empty, matching get_pause_info() == None.
+        let state = client.get_full_audit_state();
+        assert!(!state.paused);
+        assert!(state.pause_info.is_empty());
+        assert!(state.pause_info.len() <= 1);
+        assert_eq!(state.pause_info.first(), client.get_pause_info());
+
+        // Paused: exactly one element, matching get_pause_info() == Some(_).
+        client.pause(&admin, &soroban_sdk::String::from_str(&env, "maintenance"));
+        let state = client.get_full_audit_state();
+        assert!(state.paused);
+        assert_eq!(state.pause_info.len(), 1);
+        assert!(state.pause_info.len() <= 1);
+        assert_eq!(state.pause_info.first(), client.get_pause_info());
+
+        // Unpaused again: back to empty.
+        client.unpause(&admin);
+        let state = client.get_full_audit_state();
+        assert!(!state.paused);
+        assert!(state.pause_info.is_empty());
+        assert_eq!(state.pause_info.first(), client.get_pause_info());
     }
 }

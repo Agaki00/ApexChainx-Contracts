@@ -46,6 +46,8 @@ pub struct ConfigBundle {
     pub snapshot: SLAConfigSnapshot,
     /// Result schema descriptor with symbol mappings.
     pub schema: SLAResultSchema,
+    /// Config version hash corresponding to the snapshot for duplicate detection.
+    pub config_version_hash: u64,
 }
 
 #[cfg(test)]
@@ -72,6 +74,12 @@ mod tests {
         assert!(
             bundle.is_some(),
             "ConfigBundle must be available after initialize()",
+        );
+        let b = bundle.unwrap();
+        assert_eq!(
+            b.config_version_hash,
+            client.get_config_version_hash(),
+            "ConfigBundle config_version_hash must match get_config_version_hash()",
         );
     }
 
@@ -116,6 +124,9 @@ mod tests {
         // Apply a valid config update and verify the bundle picks it up.
         // Values stay inside the per-severity bounds enforced by
         // `validate_config`: critical allows threshold≤60 and penalty≥50.
+        // Set high first so cross-severity threshold ordering is satisfied
+        // when critical is updated to threshold=42 (high must be >= critical).
+        client.set_config(&admin, &symbol_short!("high"), &42, &50, &750);
         client.set_config(&admin, &symbol_short!("critical"), &42, &111, &999);
 
         let bundle = client
@@ -126,6 +137,11 @@ mod tests {
         assert_eq!(entry.config.threshold_minutes, 42);
         assert_eq!(entry.config.penalty_per_minute, 111);
         assert_eq!(entry.config.reward_base, 999);
+        assert_eq!(
+            bundle.config_version_hash,
+            client.get_config_version_hash(),
+            "Bundle config_version_hash must update when config changes",
+        );
     }
 
     #[test]
@@ -144,6 +160,7 @@ mod tests {
 
         assert_eq!(a.snapshot, b.snapshot);
         assert_eq!(a.schema, b.schema);
+        assert_eq!(a.config_version_hash, b.config_version_hash);
         assert_eq!(a.snapshot.entries.len(), 4);
         assert_eq!(a.schema.status_met, symbol_short!("met"));
     }

@@ -16,12 +16,33 @@
 //!
 //! * Uses [`crate::calculation::compute_result`] directly, the same pure
 //!   function exercised by `calculate_sla` and `calculate_sla_view`.
+//! * Uses [`crate::SLACalculatorContract::compute_config_version_hash`] to
+//!   pin the config hash across releases.
 //! * Inline constant vectors mirror the JSON baseline exactly; the JSON file
 //!   is the human-readable authority for auditors and the downstream backend.
 //! * `config_version_hash` and `recorded_at` are pinned to deterministic
-//!   sentinel values (`0`) so they never cause spurious failures.
+//!   sentinel values (`0`) in compute_result vectors so they never cause
+//!   spurious failures.
 //! * All vectors are checked in a single `#[test]` sweep so that a single
 //!   `cargo test parity_tests::` invocation is the complete release gate.
+//!
+//! ## Coverage
+//!
+//! The parity baseline covers:
+//!
+//! | Function | Coverage |
+//! |---|---|
+//! | `compute_result` | Full golden vectors across all severity/mttr combinations |
+//! | `compute_config_version_hash` | Two config sets (default + alternate) pinned |
+//!
+//! The parity baseline does **not** cover:
+//!
+//! | Function | Reason excluded |
+//! |---|---|
+//! | `record_severity_telemetry` | Requires simulated ledger time for weekly resets; covered by unit tests |
+//! | Custom severity configs | Covered by `fuzz_tests` and `config_mutation_sequences` fuzz target |
+//! | Governance outcomes | Covered by `event_ordering_tests` and `topic_stability_tests` modules |
+//! | Economic exposure math | Covered by `compute_result` golden vectors (exposure = amount) |
 //!
 //! ## Updating the baseline
 //!
@@ -30,16 +51,17 @@
 //! 1. Verify the new outputs are correct by code review.
 //! 2. Update `test_snapshots/tests/parity_baseline.json` to match.
 //! 3. Update the inline `PARITY_VECTORS` table below to match.
-//! 4. Bump the `"baseline_version"` field in the JSON file.
-//! 5. Record the change in `CHANGELOG.md` under the release section.
+//! 4. Update the `EXPECTED_HASH` constants in the config hash tests.
+//! 5. Bump the `"baseline_version"` field in the JSON file.
+//! 6. Record the change in `CHANGELOG.md` under the release section.
 //!
 //! **Never update the baseline to make a failing test pass without first
 //! confirming the new output is intentional and correct.**
 
 #![cfg(test)]
 
-use crate::{calculation::compute_result, SLAConfig};
-use soroban_sdk::{Env, Symbol};
+use crate::{calculation::compute_result, SLACalculatorContract, SLACalculatorContractClient, SLAConfig};
+use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Symbol};
 
 // ─── Sentinel values ────────────────────────────────────────────────────────
 //
@@ -643,6 +665,109 @@ fn parity_vectors_have_unique_case_ids() {
             v.case_id
         );
     }
+}
+
+// ─── Config version hash golden vectors ────────────────────────────────────
+//
+// Golden vectors for `compute_config_version_hash`. The hash is a polynomial
+// rolling hash over (threshold, penalty, reward) for each canonical severity
+// in order (critical → low). A regression in the hash algorithm invalidates
+// every stored `config_version_hash` in the backend, so this gate catches
+// silent drift before a release.
+//
+// Coverage note: telemetry, custom severities, and governance outcomes are
+// NOT covered by parity golden vectors. Telemetry requires simulated ledger
+// time; governance is covered by separate event-ordering test modules.
+// See docs/PARITY_BASELINE_COVERAGE.md for the full accounting.
+
+/// Helper: set up a contract with specific configs and read the hash.
+fn setup_and_hash(
+    critical: (u32, i128, i128),
+    high: (u32, i128, i128),
+    medium: (u32, i128, i128),
+    low: (u32, i128, i128),
+) -> (Env, u64) {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let operator = Address::generate(&env);
+    client.initialize(&admin, &operator);
+
+    client.set_config(&admin, &symbol_short!("critical"), &critical.0, &critical.1, &critical.2);
+    client.set_config(&admin, &symbol_short!("high"), &high.0, &high.1, &high.2);
+    client.set_config(&admin, &symbol_short!("medium"), &medium.0, &medium.1, &medium.2);
+    client.set_config(&admin, &symbol_short!("low"), &low.0, &low.1, &low.2);
+
+    let hash = env.as_contract(&contract_id, || {
+        SLACalculatorContract::compute_config_version_hash(&env).unwrap()
+    });
+    (env, hash)
+}
+
+/// Config version hash for the default configuration set by `initialize()`.
+///
+/// Default configs:
+///   critical: threshold=15, penalty=100, reward=750
+///   high:     threshold=30, penalty=50,  reward=750
+///   medium:   threshold=60, penalty=25,  reward=750
+///   low:      threshold=120, penalty=10, reward=600
+///
+/// This vector pins the hash for the default config so that any change to
+/// the hash algorithm or the default values is an explicit, reviewed break.
+#[test]
+fn parity_config_hash_default_config() {
+    let (_env, hash) = setup_and_hash(
+        (15, 100, 750),   // critical
+        (30, 50, 750),    // high
+        (60, 25, 750),    // medium
+        (120, 10, 600),   // low
+    );
+
+    // Golden vector: the expected hash for the default config.
+    // If this changes, verify the change is intentional (algorithm or config
+    // change), update this constant, and record in CHANGELOG.md.
+    const EXPECTED_HASH: u64 = 1_417_728_228_875_630_226;
+    assert_eq!(hash, EXPECTED_HASH,
+        "config_version_hash diverged for default config — update the golden vector if intentional");
+}
+
+/// Config version hash for an alternate config set.
+///
+/// Alternate configs:
+///   critical: threshold=30, penalty=150, reward=1000
+///   high:     threshold=60, penalty=75,  reward=1000
+///   medium:   threshold=120, penalty=35, reward=1000
+///   low:      threshold=240, penalty=15, reward=800
+///
+/// A second vector ensures the hash is not accidentally constant (e.g. the
+/// algorithm ignoring its inputs).
+#[test]
+fn parity_config_hash_alternate_config() {
+    let (_env, hash) = setup_and_hash(
+        (30, 150, 1000),  // critical
+        (60, 75, 1000),   // high
+        (120, 35, 1000),  // medium
+        (240, 15, 800),   // low
+    );
+
+    const EXPECTED_HASH: u64 = 4_112_096_853_087_571_798;
+    assert_eq!(hash, EXPECTED_HASH,
+        "config_version_hash diverged for alternate config — update the golden vector if intentional");
+}
+
+/// The two config hashes must differ (proves the hash is not constant).
+#[test]
+fn parity_config_hash_differs_across_configs() {
+    let (_, hash_default) = setup_and_hash(
+        (15, 100, 750), (30, 50, 750), (60, 25, 750), (120, 10, 600),
+    );
+    let (_, hash_alt) = setup_and_hash(
+        (30, 150, 1000), (60, 75, 1000), (120, 35, 1000), (240, 15, 800),
+    );
+    assert_ne!(hash_default, hash_alt,
+        "config_version_hash must differ for different configs — hash is ignoring its inputs");
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

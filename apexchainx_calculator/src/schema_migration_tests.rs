@@ -31,7 +31,8 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        SLACalculatorContract, SLACalculatorContractClient, RESULT_SCHEMA_FIELD_COUNT, RESULT_SCHEMA_VERSION,
+        SLACalculatorContract, SLACalculatorContractClient, CONFIG_SNAPSHOT_SCHEMA_FIELD_COUNT,
+        CONFIG_SNAPSHOT_SCHEMA_VERSION, RESULT_SCHEMA_FIELD_COUNT, RESULT_SCHEMA_VERSION,
     };
     use soroban_sdk::{testutils::Address as _, Env, Symbol};
 
@@ -215,5 +216,75 @@ mod tests {
         } else {
             panic!("get_config_bundle returned None after initialization");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // SLAConfigSnapshot sentinel: field count must match CONFIG_SNAPSHOT_SCHEMA_FIELD_COUNT
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_config_snapshot_schema_field_count_sentinel() {
+        use crate::SLAConfigSnapshot;
+        use soroban_sdk::{symbol_short, Env, Vec};
+
+        let env = Env::default();
+        let sample = SLAConfigSnapshot {
+            version: CONFIG_SNAPSHOT_SCHEMA_VERSION,
+            entries: Vec::new(&env),
+        };
+
+        let SLAConfigSnapshot {
+            version: _,
+            entries: _,
+        } = sample;
+
+        assert_eq!(
+            CONFIG_SNAPSHOT_SCHEMA_FIELD_COUNT, 2,
+            "CONFIG_SNAPSHOT_SCHEMA_FIELD_COUNT is out of sync with SLAConfigSnapshot. \
+             Update lib.rs::CONFIG_SNAPSHOT_SCHEMA_FIELD_COUNT and \
+             CONFIG_SNAPSHOT_SCHEMA_VERSION when adding or removing fields."
+        );
+    }
+
+    // Multi-arm migration harness and chaining test pattern (#505)
+    // -----------------------------------------------------------------------
+
+    /// **#505 – Multi-arm migration chaining & idempotency test pattern.**
+    ///
+    /// Demonstrates and validates the multi-step migration pattern (`v0 -> v1 -> ...`).
+    /// Verifies that a contract starting at a historical storage version (`v0`)
+    /// advances through all sequential migration arms to reach `STORAGE_VERSION`
+    /// in a single `migrate()` call, and that subsequent calls are idempotent no-ops.
+    #[test]
+    fn test_multi_arm_migration_chaining_and_idempotency() {
+        use crate::STORAGE_VERSION;
+        let (env, client) = setup();
+
+        let admin = soroban_sdk::Address::generate(&env);
+
+        // 1. Synthesize a v0 contract state by resetting STORAGE_VERSION_KEY to 0
+        env.storage().instance().set(&crate::STORAGE_VERSION_KEY, &0u32);
+
+        // Verify pre-migration state reports needs_migration = true
+        let mig_state = client.get_migration_state();
+        assert_eq!(mig_state.stored_version, 0);
+        assert_eq!(mig_state.expected_version, STORAGE_VERSION);
+        assert!(mig_state.needs_migration);
+
+        // 2. Invoke migrate() — advances v0 -> v1 (and any subsequent arms sequentially)
+        let result = client.try_migrate(&admin);
+        assert!(result.is_ok(), "migrate() failed on v0 contract state");
+
+        // 3. Verify post-migration state is fully updated to current STORAGE_VERSION
+        let post_state = client.get_migration_state();
+        assert_eq!(post_state.stored_version, STORAGE_VERSION);
+        assert!(!post_state.needs_migration);
+
+        // 4. Idempotency test: calling migrate() again when already current is a safe no-op
+        let retry_result = client.try_migrate(&admin);
+        assert!(retry_result.is_ok(), "second migrate() call must be a safe idempotent no-op");
+        let retry_state = client.get_migration_state();
+        assert_eq!(retry_state.stored_version, STORAGE_VERSION);
+        assert!(!retry_state.needs_migration);
     }
 }

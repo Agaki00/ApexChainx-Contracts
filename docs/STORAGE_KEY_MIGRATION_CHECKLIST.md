@@ -35,9 +35,7 @@ the questions below before marking your PR ready for review.
 - [ ] **`init_missing_storage_defaults` updated.** If the key must be
   present after a fresh `initialize()` call, it is written there too.
 
-- [ ] **Tests cover the migration path.** At minimum: a test that calls
-  `migrate()` on a contract state that lacks the new key, then reads the
-  key and asserts it has the expected default value.
+- [ ] **Tests cover the migration path.** At minimum: a test following the multi-arm chaining test pattern in `schema_migration_tests.rs` (`test_multi_arm_migration_chaining_and_idempotency`) that calls `migrate()` on a synthesized past contract state, asserts sequential version transition and defaults, and verifies idempotency.
 
 ---
 

@@ -175,6 +175,10 @@ pub fn is_canonical_severity(severity: &Symbol) -> bool {
 /// Step 6 encodes "rewards must materially exceed penalties" (`penalty * 1.5 <
 /// reward`) in integer arithmetic so meeting the SLA is always financially
 /// better than absorbing penalties for a minor overrun.
+///
+/// **Note:** Cross-severity threshold ordering (`critical <= high <= medium <=
+/// low`) is enforced by `validate_cross_severity_threshold_ordering` in the
+/// `set_config` path, not here, because it requires access to stored state.
 pub fn expected_validate_config(
     severity: &Symbol,
     threshold_minutes: u32,

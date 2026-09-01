@@ -89,7 +89,7 @@ pub fn canonical_field_counts() -> [(&'static str, u32); 31] {
         ("FailureCode", 3),
         ("FailureSchema", 2),
         ("HealthcheckResult", 3),
-        ("ConfigBundle", 2),
+        ("ConfigBundle", 3),
         ("AuditState", 10),
         ("ContractInfo", 11),
         ("HistoryPage", 3),
@@ -119,7 +119,7 @@ pub fn sl_a_error_count() -> u32 {
 ///
 /// **Maintainer note:** This must cover every event constant declared in
 /// `event_schema.rs`. When a new event name is added there, add it here too.
-pub fn event_name_symbols() -> [&'static str; 20] {
+pub fn event_name_symbols() -> [&'static str; 22] {
     [
         "sla_calc",
         "set_int",
@@ -133,9 +133,11 @@ pub fn event_name_symbols() -> [&'static str; 20] {
         "adm_acc",
         "adm_can",
         "adm_ren",
+        "adm_sup",
         "op_prop",
         "op_acc",
         "op_can",
+        "op_sup",
         "cfg_frz",
         "cfg_unfrz",
         "stats_sat",
@@ -165,7 +167,7 @@ pub fn assess_stability() -> StabilityScore {
     }
 
     // Check event symbols are at expected count.
-    if event_name_symbols().len() != 20 {
+    if event_name_symbols().len() != 22 {
         return StabilityScore::C;
     }
 
@@ -249,7 +251,7 @@ mod tests {
     fn test_225_event_symbols_are_well_known() {
         // All public event names must be documented and stable.
         let events = event_name_symbols();
-        let expected = 20;
+        let expected = 22;
         assert_eq!(
             events.len(),
             expected,
@@ -285,9 +287,11 @@ mod tests {
             crate::event_schema::EVENT_ADMIN_ACC,
             crate::event_schema::EVENT_ADMIN_CAN,
             crate::event_schema::EVENT_ADMIN_REN,
+            crate::event_schema::EVENT_ADMIN_SUP,
             crate::event_schema::EVENT_OP_PROP,
             crate::event_schema::EVENT_OP_ACC,
             crate::event_schema::EVENT_OP_CAN,
+            crate::event_schema::EVENT_OP_SUP,
             crate::event_schema::EVENT_CONFIG_FREEZE,
             crate::event_schema::EVENT_CONFIG_UNFREEZE,
             crate::event_schema::EVENT_STATS_SAT,
