@@ -21,13 +21,13 @@ mod event_ordering_tests {
         symbol_short, testutils::Address as _, testutils::Events, Address, Env, Symbol,
         TryIntoVal,
     };
+    use alloc::vec::Vec;
     use crate::{
-        EVENT_CONFIG_UPD, EVENT_OP_ACC, EVENT_OP_CAN, EVENT_OP_PROP, EVENT_PAUSED, EVENT_PRUNED,
-        EVENT_PRUNED_AGE, EVENT_SETTLE_INTENT, EVENT_SLA_CALC, EVENT_UNPAUSED,
+        EVENT_CONFIG_UPD, EVENT_PAUSED, EVENT_SETTLE_INTENT, EVENT_SLA_CALC, EVENT_UNPAUSED,
         SLACalculatorContract, SLACalculatorContractClient,
     };
 
-    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
+    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
         env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(env, &contract_id);
@@ -163,7 +163,7 @@ mod event_ordering_tests {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
 
-        client.pause(&admin);
+        client.pause(&admin, &soroban_sdk::String::from_str(&env, "test"));
         client.unpause(&admin);
 
         let names = event_names(&env);
@@ -198,12 +198,8 @@ mod event_ordering_tests {
 
         let count = 5;
         for i in 0..count {
-            client.calculate_sla(
-                &operator,
-                &symbol_short!("CNT"),
-                &symbol_short!("critical"),
-                &(5u32 + i),
-            );
+            let id = Symbol::new(&env, &alloc::format!("CNT{}", i));
+            client.calculate_sla(&operator, &id, &symbol_short!("critical"), &(5u32 + i));
         }
 
         let names = event_names(&env);
@@ -304,6 +300,6 @@ mod event_ordering_tests {
         let env = Env::default();
         let (_, _, client) = setup(&env);
         let stranger = Address::generate(&env);
-        client.pause(&stranger);
+        client.pause(&stranger, &soroban_sdk::String::from_str(&env, "test"));
     }
 }

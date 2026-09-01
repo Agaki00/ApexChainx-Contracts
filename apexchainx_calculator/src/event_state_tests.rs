@@ -9,7 +9,7 @@ mod event_state_tests {
         EVENT_VERSION, SLACalculatorContract, SLACalculatorContractClient, SLAConfig,
     };
 
-    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
+    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
         env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(env, &contract_id);
@@ -17,10 +17,6 @@ mod event_state_tests {
         let operator = Address::generate(env);
         client.initialize(&admin, &operator);
         (admin, operator, client)
-    }
-
-    fn symbol(env: &Env, value: &str) -> Symbol {
-        Symbol::new(env, value)
     }
 
     // ── sla_calc event ↔ stored history parity ──────────────────────────
@@ -262,7 +258,7 @@ mod event_state_tests {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
 
-        client.pause(&admin);
+        client.pause(&admin, &soroban_sdk::String::from_str(&env, "test"));
 
         assert!(client.is_paused());
         assert!(client.get_pause_info().is_some());
@@ -280,7 +276,7 @@ mod event_state_tests {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
 
-        client.pause(&admin);
+        client.pause(&admin, &soroban_sdk::String::from_str(&env, "test"));
         client.unpause(&admin);
 
         assert!(!client.is_paused());
@@ -300,6 +296,7 @@ mod event_state_tests {
     #[test]
     fn test_prune_event_reflects_pruned_history() {
         let env = Env::default();
+        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
@@ -307,13 +304,9 @@ mod event_state_tests {
         client.initialize(&admin, &operator);
 
         // Add 5 entries
-        for _ in 0..5u32 {
-            client.calculate_sla(
-                &operator,
-                &symbol_short!("PR_EVT"),
-                &symbol_short!("low"),
-                &10,
-            );
+        for i in 0..5u32 {
+            let id = Symbol::new(&env, &alloc::format!("PR_EVT{}", i));
+            client.calculate_sla(&operator, &id, &symbol_short!("low"), &10);
         }
 
         assert_eq!(client.get_history().len(), 5);
@@ -335,6 +328,7 @@ mod event_state_tests {
     #[test]
     fn test_prune_by_age_event_reflects_pruned_history() {
         let env = Env::default();
+        env.mock_all_auths();
         env.ledger().set_timestamp(1000);
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);
@@ -592,8 +586,8 @@ mod event_state_tests {
     fn test_stranger_cannot_pause() {
         let env = Env::default();
         let (_, _, client) = setup(&env);
-        let stranger = Address::generate(&env);
-        client.pause(&stranger);
+let stranger = Address::generate(&env);
+        client.pause(&stranger, &soroban_sdk::String::from_str(&env, "test"));
     }
 
     #[test]

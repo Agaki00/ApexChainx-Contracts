@@ -334,7 +334,10 @@ variant:
 | 17 | `InvalidInput` | Invalid input parameter |
 | 18 | `SeverityNotInSet` | Custom severity not registered |
 | 19 | `OutageRecalcLimit` | Outage recalc limit reached |
-| **20+** | *(next available)* | *(reserved for future additions)* |
+| 20 | `ProposalExpired` | Proposal expired |
+| 21 | `AdminRenounced` | Admin authority renounced |
+| 22 | `ExposureOverflow` | Exposure totals overflow i128 |
+| **23+** | *(next available)* | *(reserved for future additions)* |
 
 > This table is auto-derived from `get_failure_schema()` in `lib.rs`.  Keep
 > both in sync whenever the catalogue changes.

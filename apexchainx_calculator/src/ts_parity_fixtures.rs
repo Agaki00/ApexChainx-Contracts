@@ -105,6 +105,8 @@ fn event_topic_table() -> StdVec<(&'static str, &'static str, Symbol)> {
         ("duplicateInput", "dup_input", crate::EVENT_DUP_INPUT),
         ("configUpdated", "cfg_upd", crate::EVENT_CONFIG_UPD),
         ("configRemoved", "cfg_rem", crate::EVENT_CONFIG_REM),
+        ("severityAdded", "sev_add", crate::EVENT_SEV_ADD),
+        ("severityUpdated", "sev_upd", crate::EVENT_SEV_UPD),
         ("pruned", "pruned", crate::EVENT_PRUNED),
         ("prunedByAge", "pruned_a", crate::EVENT_PRUNED_AGE),
         ("retentionLimitSet", "ret_lim", crate::EVENT_RET_LIM),

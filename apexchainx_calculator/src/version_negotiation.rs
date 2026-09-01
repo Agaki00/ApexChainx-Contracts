@@ -200,8 +200,8 @@ pub fn negotiate_contract_versions(
 /// downstream contracts should expose for version discovery.
 pub fn version_discovery_interfaces(env: &Env) -> Vec<Symbol> {
     let mut ifaces = Vec::new(env);
-    ifaces.push_back(symbol_short!("ver_info"));
-    ifaces.push_back(symbol_short!("mig_state"));
+    ifaces.push_back(Symbol::new(env, "get_version_info"));
+    ifaces.push_back(Symbol::new(env, "get_migration_state"));
     ifaces.push_back(symbol_short!("is_paused"));
     ifaces
 }
@@ -325,9 +325,31 @@ mod tests {
         let env = Env::default();
         let ifaces = version_discovery_interfaces(&env);
         assert_eq!(ifaces.len(), 3);
-        assert!(ifaces.contains(&symbol_short!("ver_info")));
-        assert!(ifaces.contains(&symbol_short!("mig_state")));
+        assert!(ifaces.contains(&Symbol::new(&env, "get_version_info")));
+        assert!(ifaces.contains(&Symbol::new(&env, "get_migration_state")));
         assert!(ifaces.contains(&symbol_short!("is_paused")));
+    }
+
+    #[test]
+    fn test_version_discovery_interfaces_match_actual_methods() {
+        let env = Env::default();
+        let ifaces = version_discovery_interfaces(&env);
+        
+        // Verify each discovery symbol corresponds to an actual contract method
+        // These are the exact method names exposed in the contract's public API
+        let expected_methods = [
+            Symbol::new(&env, "get_version_info"),
+            Symbol::new(&env, "get_migration_state"),
+            symbol_short!("is_paused"),
+        ];
+        
+        for expected_method in expected_methods.iter() {
+            assert!(
+                ifaces.contains(expected_method),
+                "Discovery list should contain actual method: {:?}",
+                expected_method
+            );
+        }
     }
 
     #[test]

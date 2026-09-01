@@ -22,23 +22,21 @@
 
 #[cfg(test)]
 mod pruning_perf_tests {
-    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
+    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Symbol};
 
     use crate::{SLACalculatorContract, SLACalculatorContractClient};
 
-    fn setup_with_history(env: &Env, count: u32) -> (Address, Address, SLACalculatorContractClient) {
+    fn setup_with_history(env: &Env, count: u32) -> (Address, Address, SLACalculatorContractClient<'_>) {
+        env.mock_all_auths();
+        env.budget().reset_unlimited();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(env, &contract_id);
         let admin = Address::generate(env);
         let operator = Address::generate(env);
         client.initialize(&admin, &operator);
         for i in 1..=count {
-            client.calculate_sla(
-                &operator,
-                &symbol_short!("OUT"),
-                &symbol_short!("high"),
-                &i,
-            );
+            let id = Symbol::new(env, &alloc::format!("OUT{}", i));
+            client.calculate_sla(&operator, &id, &symbol_short!("high"), &i);
         }
         (admin, operator, client)
     }
@@ -88,6 +86,7 @@ mod pruning_perf_tests {
         let env = Env::default();
         let (admin, _operator, client) = setup_with_history(&env, 20);
         client.prune_history(&admin, &0);
+        assert_eq!(client.get_history().len(), 0);
     }
 
     #[test]

@@ -57,6 +57,23 @@
 //! - repeated writes preserve invocation order; see the regression policy in
 //!   `docs/PROJECT_CONTEXT.md`
 //!
+//! ## sev_add (`sev_add`)
+//! Emitted when `set_custom_severity` registers a **new** custom severity.
+//! - topic[2]: custom severity Symbol
+//! - payload:  (threshold_minutes: u32, penalty_per_minute: i128,
+//!   reward_base: i128)
+//!
+//! ## sev_upd (`sev_upd`)
+//! Emitted when `set_custom_severity` **reconfigures** an existing one.
+//! - topic[2]: custom severity Symbol
+//! - payload:  (threshold_minutes: u32, penalty_per_minute: i128,
+//!   reward_base: i128)
+//!
+//! ## cfg_rem (`cfg_rem`)
+//! Emitted when `remove_custom_severity` deletes a custom severity.
+//! - topic[2]: custom severity Symbol
+//! - payload:  ()
+//!
 //! ## paused (`paused`)
 //! Emitted when the contract is paused.
 //! - topic[2]: caller Address
@@ -68,8 +85,13 @@
 //! - payload:  (false,)
 //!
 //! ## op_set (`op_set`)
-//! Emitted on operator change.
-//! - topic[2]: caller Address
+//! Emitted when the operator is set directly by the admin (single-step legacy path).
+//! Unlike the two-step path (`op_prop` → `op_acc`), this event indicates the new
+//! operator did **not** consent to the role change — `set_operator` only requires
+//! the admin's authorization. Consumers that need to distinguish consented from
+//! non-consented operator changes should check for this event name vs. the
+//! `op_prop`+`op_acc` pair.
+//! - topic[2]: caller Address (admin who performed the set)
 //! - payload:  (new_operator: Address,)
 //!
 //! ## pruned (`pruned`)
@@ -102,6 +124,12 @@
 //! - topic[2]: caller Address
 //! - payload:  ()
 //!
+//! ## adm_sup (`adm_sup`)
+//! Emitted when a pending admin proposal is superseded by a re-proposal
+//! before the prior candidate accepted or cancelled. (#468)
+//! - topic[2]: caller Address
+//! - payload:  (superseded_admin: Address, new_admin: Address)
+//!
 //! ## op_prop (`op_prop`)
 //! Emitted when a new operator is proposed.
 //! - topic[2]: caller Address
@@ -116,6 +144,12 @@
 //! Emitted when a pending operator proposal is cancelled.
 //! - topic[2]: caller Address
 //! - payload:  ()
+//!
+//! ## op_sup (`op_sup`)
+//! Emitted when a pending operator proposal is superseded by a re-proposal
+//! before the prior candidate accepted or cancelled. (#468)
+//! - topic[2]: caller Address
+//! - payload:  (superseded_operator: Address, new_operator: Address)
 //!
 //! ## cfg_frz (`cfg_frz`)
 //! Emitted when the configuration is frozen by admin.
@@ -208,6 +242,14 @@ pub const EVENT_SETTLE_INTENT: Symbol = symbol_short!("set_int");
 pub const EVENT_CONFIG_UPD: Symbol = symbol_short!("cfg_upd");
 /// Emitted when a custom severity is removed via remove_custom_severity.
 pub const EVENT_CONFIG_REM: Symbol = symbol_short!("cfg_rem");
+/// Emitted when a new custom severity is registered (first creation).
+/// Distinguishable from cfg_upd by indexers: the custom severity did not
+/// exist before this call. (#456)
+pub const EVENT_SEV_ADD: Symbol = symbol_short!("sev_add");
+/// Emitted when an existing custom severity is reconfigured.
+/// Distinguishable from sev_add by indexers: the custom severity already
+/// existed before this call. (#456)
+pub const EVENT_SEV_UPD: Symbol = symbol_short!("sev_upd");
 pub const EVENT_PAUSED: Symbol = symbol_short!("paused");
 pub const EVENT_UNPAUSED: Symbol = symbol_short!("unpause");
 pub const EVENT_OP_SET: Symbol = symbol_short!("op_set");
@@ -220,6 +262,10 @@ pub const EVENT_ADMIN_REN: Symbol = symbol_short!("adm_ren");
 pub const EVENT_OP_PROP: Symbol = symbol_short!("op_prop");
 pub const EVENT_OP_ACC: Symbol = symbol_short!("op_acc");
 pub const EVENT_OP_CAN: Symbol = symbol_short!("op_can");
+/// Emitted when a pending admin proposal is superseded by a re-proposal. (#468)
+pub const EVENT_ADMIN_SUP: Symbol = symbol_short!("adm_sup");
+/// Emitted when a pending operator proposal is superseded by a re-proposal. (#468)
+pub const EVENT_OP_SUP: Symbol = symbol_short!("op_sup");
 pub const EVENT_CONFIG_FREEZE: Symbol = symbol_short!("cfg_frz");
 pub const EVENT_CONFIG_UNFREEZE: Symbol = symbol_short!("cfg_unfrz");
 /// Emitted when a running-stats counter saturates. (SC-W5-047)
@@ -250,6 +296,8 @@ mod tests {
             EVENT_SETTLE_INTENT,
             EVENT_CONFIG_UPD,
             EVENT_CONFIG_REM,
+            EVENT_SEV_ADD,
+            EVENT_SEV_UPD,
             EVENT_PAUSED,
             EVENT_UNPAUSED,
             EVENT_OP_SET,
@@ -259,9 +307,11 @@ mod tests {
             EVENT_ADMIN_ACC,
             EVENT_ADMIN_CAN,
             EVENT_ADMIN_REN,
+            EVENT_ADMIN_SUP,
             EVENT_OP_PROP,
             EVENT_OP_ACC,
             EVENT_OP_CAN,
+            EVENT_OP_SUP,
             EVENT_CONFIG_FREEZE,
             EVENT_CONFIG_UNFREEZE,
             EVENT_STATS_SAT,

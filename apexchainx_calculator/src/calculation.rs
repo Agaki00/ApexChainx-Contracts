@@ -31,7 +31,7 @@ use crate::{
     SLAConfig, SLAError, SLAResult, SLAStats, SeverityTelemetry, EVENT_DUP_INPUT, EVENT_SETTLE_INTENT,
     EVENT_SLA_CALC, EVENT_VERSION, HISTORY_KEY, LAST_CALCULATION_TS_KEY, LAST_VIOLATION_TS_KEY,
     MAX_HISTORY_SIZE, MAX_RECALCS_PER_OUTAGE, PAUSED_KEY, RETENTION_LIMIT_KEY, SEVERITY_CALC_COUNTS_KEY,
-    SEVERITY_VIOL_COUNTS_KEY, STATS_KEY,
+    SEVERITY_VIOL_COUNTS_KEY, STATS_KEY, TOTAL_ENTRIES_KEY, TOTAL_PRUNED_KEY,
 };
 
 /// Calculate the SLA outcome for an outage event (delegated implementation).
@@ -115,6 +115,16 @@ pub fn calculate_sla(
 
     history.push_back(result.clone());
 
+    // #461 – track total entries ever stored
+    let prev_total: u32 = env
+        .storage()
+        .instance()
+        .get(&TOTAL_ENTRIES_KEY)
+        .unwrap_or(0);
+    env.storage()
+        .instance()
+        .set(&TOTAL_ENTRIES_KEY, &prev_total.saturating_add(1));
+
     let retention_limit: u32 = env
         .storage()
         .instance()
@@ -127,6 +137,15 @@ pub fn calculate_sla(
             trimmed.push_back(history.get(i).unwrap());
         }
         env.storage().instance().set(&HISTORY_KEY, &trimmed);
+        // #461 – automatic trim pruned exactly 1 entry (the oldest)
+        let prev_pruned: u32 = env
+            .storage()
+            .instance()
+            .get(&TOTAL_PRUNED_KEY)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&TOTAL_PRUNED_KEY, &prev_pruned.saturating_add(1));
     } else {
         env.storage().instance().set(&HISTORY_KEY, &history);
     }
@@ -158,6 +177,29 @@ pub fn calculate_sla_view(
     crate::SLACalculatorContract::check_version(env)?;
     let cfg = crate::SLACalculatorContract::load_config(env, &severity)?;
     let config_version_hash = crate::SLACalculatorContract::compute_config_version_hash(env)?;
+
+    let history: Vec<SLAResult> = env
+        .storage()
+        .instance()
+        .get(&HISTORY_KEY)
+        .unwrap_or_else(|| Vec::new(env));
+
+    let mut existing: Option<SLAResult> = None;
+    for i in 0..history.len() {
+        let entry = history.get(i).unwrap();
+        if entry.outage_id == outage_id {
+            existing = Some(entry);
+        }
+    }
+    if let Some(prev) = existing {
+        if prev.config_version_hash == config_version_hash {
+            if prev.mttr_minutes != mttr_minutes || prev.threshold_minutes != cfg.threshold_minutes {
+                return Err(SLAError::DuplicateOutageInput);
+            }
+            return Ok(prev);
+        }
+    }
+
     compute_result(
         outage_id,
         mttr_minutes,
@@ -212,6 +254,12 @@ fn require_not_paused(env: &Env) -> Result<(), SLAError> {
     Ok(())
 }
 
+/// Maximum allowed MTTR in minutes to prevent arithmetic overflow.
+/// This conservative bound ensures that even with maximum penalty rates,
+/// the calculation cannot overflow i128. 
+/// 525,600 minutes = 365 days, well beyond any realistic outage duration.
+const MAX_MTTR_MINUTES: u32 = 525_600;
+
 /// Computes the SLA result (met/violated, reward/penalty, rating) from inputs.
 /// Pure function — no state reads or writes.
 pub fn compute_result(
@@ -222,6 +270,11 @@ pub fn compute_result(
     recorded_at: u64,
 ) -> Result<SLAResult, SLAError> {
     let threshold = cfg.threshold_minutes;
+    
+    // Validate input range before computation to provide clear error messages
+    if mttr_minutes > MAX_MTTR_MINUTES {
+        return Err(SLAError::InvalidInput);
+    }
 
     if mttr_minutes > threshold {
         let overtime = (mttr_minutes - threshold) as i128;
@@ -306,7 +359,7 @@ fn set_count_lane(packed: u128, index: u32, value: u32) -> u128 {
 ///
 /// - **Lazy Reset Strategy**: Resets are non-blocking and lazy; counters are not automatically reset by background cron tasks.
 ///   Instead, reset is triggered on the next `calculate_sla` invocation for that specific severity lane once 7 days have passed.
-/// - **Lane Isolation**: Reset is per-severity lane. Calculations or inactivity in one severity level do not reset telemetry for other severities.
+/// - **Per-Counter Isolation**: Resets are per-counter within each severity lane. Inactivity in calculation or violation counters resets only its respective counter (e.g., a stale calculation counter reset will not wipe a fresh violation counter).
 /// - **Reinitialization**: Upon reset, the lane's calculation and violation counters are cleared to 0 before the current invocation is recorded,
 ///   reinitializing the count to 1 calculation (and 1 violation if the current calculation violated SLA).
 ///
@@ -327,8 +380,10 @@ pub fn record_severity_telemetry(env: &Env, severity: &Symbol, met: bool) {
     let last_violation = count_lane(last_violations, index) as u64;
     let calc_stale = last_calc != 0 && now.saturating_sub(last_calc) >= week_seconds;
     let violation_stale = last_violation != 0 && now.saturating_sub(last_violation) >= week_seconds;
-    if calc_stale || violation_stale {
+    if calc_stale {
         calculations = set_count_lane(calculations, index, 0);
+    }
+    if violation_stale {
         violations = set_count_lane(violations, index, 0);
     }
 

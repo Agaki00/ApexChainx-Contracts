@@ -141,6 +141,24 @@ fuzz-run target seconds="60":
 parity-check:
     cd {{crate}} && cargo test --lib parity_tests::
 
+# ------------------------------------------------------------ ts property tests ------
+
+# Run the TypeScript property/regression test suite in tests/.
+# These tests assert cross-language parity, simulation reproducibility,
+# and behavioral invariants that cargo test does not cover.
+ts-property-tests:
+    npx tsx --test tests/*.test.ts
+
+# ------------------------------------------------------------ offchain checks ------
+
+# Run offchain budget/regression checks (event size, read cost, governance, metadata).
+# Each script exits non-zero on assertion failure, so CI can gate on the recipe.
+offchain-checks:
+    npx tsx offchain/eventSizeRegression.ts
+    npx tsx offchain/readCostRegression.ts
+    npx tsx offchain/governanceConsistency.ts
+    npx tsx offchain/contractMetadata.ts
+
 # ------------------------------------------------------------ ts parity ------
 
 # Regenerate the contract-derived artefacts the ts/ helpers are checked against.
@@ -217,6 +235,12 @@ wasm-release:
 # Assert no_std compliance for wasm32.   [CI: WASM no-std compliance check]
 no-std:
     cd {{crate}} && cargo check --target {{wasm_target}} --lib
+
+# Fail when a .rs file in the crate is never declared as a module (#491).
+# An undeclared file is invisible to cargo check/clippy/test and rots silently;
+# see scripts/check-orphan-modules.sh.                    [CI: client-checks]
+lint-orphans:
+    ./scripts/check-orphan-modules.sh
 
 # sha256 of the release WASM.            [CI: Generate hash]
 hash: wasm-release
@@ -340,5 +364,5 @@ clean:
     cd {{crate}} && cargo clean
 
 # Everything CI gates on, in CI's order. Run before opening a PR.
-ci: fmt-check lint check no-std test fuzz fuzz-spec parity-check ts-check wasm machete udeps verify-snapshots
+ci: fmt-check lint check no-std lint-orphans test fuzz fuzz-spec parity-check ts-check wasm machete udeps verify-snapshots
     @echo "✓ local CI equivalent passed"

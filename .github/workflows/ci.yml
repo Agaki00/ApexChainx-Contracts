@@ -35,6 +35,14 @@ jobs:
       - name: no_std compatibility lint (early gate)
         run: ./scripts/check-no-std.sh
 
+      # Issue #491: Orphan module lint — fails when a `.rs` file in the crate
+      # is never declared as a module (e.g. the committed scratch_test.rs that
+      # shipped for weeks without CI noticing). An undeclared file is invisible
+      # to cargo check/clippy/test, so its tests rot silently; this gate closes
+      # that class.
+      - name: Orphan module lint (early gate)
+        run: ./scripts/check-orphan-modules.sh
+
       # Issue #12: WASM no-std compliance check.
       # Compiles only the library crate for wasm32-unknown-unknown so that any
       # accidental `std` import surfaces here (before deployment) as a compile
@@ -268,6 +276,60 @@ jobs:
 
       - name: Run the TypeScript parity suite
         run: npx tsx --test ts/parity/readSemanticsParity.test.ts
+
+  # Issue #490: Run the orphaned TypeScript property/regression test suite.
+  # These tests assert cross-language parity, simulation reproducibility,
+  # and behavioral invariants that cargo test does not cover.
+  ts-property-tests:
+    name: TS Property Tests (tests/*.test.ts)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Run property/regression test suite
+        run: npx tsx --test tests/*.test.ts
+
+  # Issue #490: Run offchain budget/regression checks (event size, read cost,
+  # governance consistency, metadata). Each script exits non-zero on failure.
+  offchain-checks:
+    name: Offchain Budget Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Run event-size regression checks
+        run: npx tsx offchain/eventSizeRegression.ts
+
+      - name: Run read-cost regression checks
+        run: npx tsx offchain/readCostRegression.ts
+
+      - name: Run governance consistency checks
+        run: npx tsx offchain/governanceConsistency.ts
+
+      - name: Run contract metadata checks
+        run: npx tsx offchain/contractMetadata.ts
 
   release-tests:
     name: Release Tests (#90)

@@ -331,14 +331,19 @@ reconciliation alongside `sla_calc`):
 
 ### Configuration update: `cfg_upd`
 
-Emitted by `set_config`, `set_custom_severity`, and
-`remove_custom_severity`. The `cfg_upd` event always carries the
+Emitted by `set_config`. The `cfg_upd` event always carries the
 **post-write** values.
 
-When `remove_custom_severity` succeeds, the emitted `cfg_upd` payload
-uses zeros (so indexers can distinguish a deletion from a "set to
-zero" — see [`CHANGELOG.md`](../CHANGELOG.md) for the explicit
-contract on this).
+### Custom severity lifecycle: `sev_add`, `sev_upd`, `cfg_rem`
+
+- `sev_add` — emitted when `set_custom_severity` registers a **new** custom severity.
+- `sev_upd` — emitted when `set_custom_severity` **reconfigures** an existing one.
+- `cfg_rem` — emitted when `remove_custom_severity` deletes a custom severity.
+
+All three carry the custom severity symbol in topic[2]. `sev_add` and
+`sev_upd` carry the post-write config triple; `cfg_rem` carries an empty
+payload. Indexers can reconstruct the registered custom-severity set by
+tracking `sev_add` (add) and `cfg_rem` (remove) events.
 
 | Field | Type | Description |
 |-------|------|-------------|
