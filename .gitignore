@@ -19,7 +19,6 @@ apexchainx_calculator/test_snapshots/tests/*.json.tmp
 *.wasm
 
 # IDE
-.vscode/
 .idea/
 *.swp
 *.swo
@@ -47,3 +46,7 @@ node_modules/
 /target/
 **/*.rs.bk
 *.wasm
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore
