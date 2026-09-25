@@ -19,7 +19,6 @@ apexchainx_calculator/test_snapshots/tests/*.json.tmp
 *.wasm
 
 # IDE
-.vscode/
 .idea/
 *.swp
 *.swo
@@ -39,11 +38,14 @@ Thumbs.db
 node_modules/
 
 # Environment secrets
-.env
-.env.*
 !.env.example
 
 
 /target/
 **/*.rs.bk
 *.wasm
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore
+config.bat
