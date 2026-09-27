@@ -257,7 +257,9 @@ pub(crate) const STORAGE_VERSION_KEY: Symbol = symbol_short!("VER");
 // This must stay in lockstep with migrate(): a deployed v2 contract has
 // history/configs in the pre-v3 shapes but not the sharded history keys or
 // the cached config count.
-pub(crate) const STORAGE_VERSION: u32 = 3;
+// v4 adds LCFGUPDA (config-update actor attribution, #671). A deployed v3
+// contract has config-update metadata (sequence) but no actor snapshot.
+pub(crate) const STORAGE_VERSION: u32 = 4;
 
 /// Version of the SLAResult schema exposed via get_result_schema().
 /// Incremented when result encoding changes in a breaking way.
@@ -359,6 +361,11 @@ pub(crate) const TOTAL_ENTRIES_KEY: Symbol = symbol_short!("TTOTENT");
 /// On-chain key storing the ledger sequence of the last config update. Re-exported
 /// here so the storage-key namespace regression test catches any future collisions.
 pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
+
+/// On-chain key storing the admin address that performed the last config update
+/// (#671). Re-exported here so the storage-key namespace regression test catches
+/// any future collisions.
+pub use crate::config_metadata::LCFG_UPD_ACTOR_KEY;
 
 // -----------------------------------------------------------------------
 // Event Constants
@@ -1135,6 +1142,12 @@ pub struct PauseInfo {
 pub struct ConfigUpdateInfo {
     /// Ledger sequence at which the most recent `set_config` succeeded.
     pub sequence: u32,
+    /// Admin address that performed the most recent `set_config` (#671).
+    /// `None` when the recorded update predates the v4 storage schema —
+    /// meaning "attribution was not yet recorded", never "no actor exists".
+    /// Additive field; older consumers that decode only `sequence` are
+    /// unaffected.
+    pub actor: Option<Address>,
 }
 
 /// SC-021 – Storage version and migration posture for off-chain consumers.
@@ -1638,6 +1651,19 @@ impl SLACalculatorContract {
             current = 3;
         }
 
+        // v3 → v4: backfill config-update actor attribution (#671).
+        // Deployments whose last config update predates the actor key keep
+        // their recorded sequence but report `actor: None` until the next
+        // admin config change overwrites both fields atomically. Nothing to
+        // derive here: attribution that never happened cannot be
+        // reconstructed, and backfilling a zero address would misattribute
+        // the change. Fresh `initialize` also never writes the actor key —
+        // it is created on the first successful config update.
+        if current == 3 {
+            env.storage().instance().set(&STORAGE_VERSION_KEY, &4u32);
+            current = 4;
+        }
+
         // Sanity: after all steps we must be at STORAGE_VERSION
         if current != STORAGE_VERSION {
             return Err(SLAError::VersionMismatch);
@@ -1917,11 +1943,12 @@ impl SLACalculatorContract {
             .instance()
             .set(&CONFIG_COUNT_KEY, &configs.len());
 
-        // Issue #4 – stamp the ledger sequence of the most recent config
-        // update so backends can detect when their cached configuration is
-        // stale. Called after the storage write so the recorded sequence
-        // always reflects a successful update.
-        config_metadata::record_config_update(&env);
+        // Issue #4/#671 – stamp the ledger sequence of the most recent config
+        // update together with the admin that performed it, so backends can
+        // both detect stale cached configuration and attribute the change.
+        // Called after the storage write so the recorded metadata always
+        // reflects a successful update.
+        config_metadata::record_config_update(&env, &caller);
 
         // #408 – record the config snapshot under its new version hash so
         // historical configs remain recoverable for deterministic replay.
@@ -1991,7 +2018,9 @@ impl SLACalculatorContract {
         );
         env.storage().instance().set(&CUSTOM_CONFIG_KEY, &custom);
 
-        config_metadata::record_config_update(&env);
+        // #671 – attribute custom-severity config updates to the acting admin
+        // as well, so "who tuned severity X" covers custom lanes too.
+        config_metadata::record_config_update(&env, &caller);
         // #408 – record the config snapshot under its new version hash.
         Self::record_config_registry(&env)?;
 
@@ -2093,7 +2122,8 @@ impl SLACalculatorContract {
     /// Soroban contract client boundary.
     pub fn get_last_config_update(env: Env) -> Result<Option<ConfigUpdateInfo>, SLAError> {
         Self::check_version(&env)?;
-        Ok(config_metadata::get_last_config_update(&env).map(|seq| ConfigUpdateInfo { sequence: seq }))
+        Ok(config_metadata::get_last_config_update(&env)
+            .map(|(sequence, actor)| ConfigUpdateInfo { sequence, actor }))
     }
 
     /// Returns a deterministic backend-friendly snapshot of all config values.
@@ -3770,7 +3800,6 @@ impl SLACalculatorContract {
 
     /// Returns the raw log of recent SLA calculations stored on-chain.
     pub fn get_history(env: Env) -> Result<Vec<SLAResult>, SLAError> {
-        history::get_history(&env)
         Self::check_version(&env)?;
         Ok(history::read_all_entries(&env))
     }
@@ -3783,7 +3812,6 @@ impl SLACalculatorContract {
     /// so only the dropped entries and their owning outage index lists are
     /// rewritten (O(dropped) writes), never the whole retained set (#582).
     pub fn prune_history(env: Env, caller: Address, keep_latest: u32) -> Result<(), SLAError> {
-        history::prune_history(&env, &caller, keep_latest)
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
 
@@ -3802,7 +3830,6 @@ impl SLACalculatorContract {
     /// time. View-mode results (from `calculate_sla_view`) are never stored to history,
     /// so the empty-edge case of `recorded_at == 0` does not occur in practice.
     pub fn prune_history_by_age(env: Env, caller: Address, min_age_seconds: u64) -> Result<(), SLAError> {
-        history::prune_history_by_age(&env, &caller, min_age_seconds)
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
 
@@ -3868,7 +3895,6 @@ impl SLACalculatorContract {
     ///
     /// See `docs/HISTORY_PAGINATION_POLICY.md` for the full policy.
     pub fn get_history_page(env: Env, offset: u32, limit: u32) -> Result<Vec<SLAResult>, SLAError> {
-        history::get_history_page(&env, offset, limit)
         Self::check_version(&env)?;
         let (head, tail) = (history::head(&env), history::tail(&env));
         let total = tail.saturating_sub(head);
@@ -3897,7 +3923,6 @@ impl SLACalculatorContract {
     /// identical to `get_history_page` — see
     /// `docs/HISTORY_PAGINATION_POLICY.md`.
     pub fn get_history_page_with_meta(env: Env, offset: u32, limit: u32) -> Result<HistoryPage, SLAError> {
-        history::get_history_page_with_meta(&env, offset, limit)
         Self::check_version(&env)?;
         let (head, tail) = (history::head(&env), history::tail(&env));
         let total = tail.saturating_sub(head);
@@ -3937,7 +3962,6 @@ impl SLACalculatorContract {
     /// so consumers can match records to specific config generations. The final
     /// entry in the returned array represents the latest decision.
     pub fn get_history_by_outage(env: Env, outage_id: Symbol) -> Result<Vec<SLAResult>, SLAError> {
-        history::get_history_by_outage(&env, outage_id)
         Self::check_version(&env)?;
         // Read only the outage's index subset instead of scanning the whole
         // retained history (#581): cost is proportional to the matching entries.
@@ -3951,7 +3975,6 @@ impl SLACalculatorContract {
     /// Returns the most recent history entry for the given `outage_id`, or `None`
     /// if no entry exists for that outage.
     pub fn get_latest_by_outage(env: Env, outage_id: Symbol) -> Result<Option<SLAResult>, SLAError> {
-        history::get_latest_by_outage(&env, outage_id)
         Self::check_version(&env)?;
         // The per-outage index stores the newest index last, so this reads a
         // single entry instead of scanning the whole retained history (#581).
@@ -3962,11 +3985,12 @@ impl SLACalculatorContract {
     // SC-079: Read-only history / retention helpers
     // -------------------------------------------------------------------
 
-    /// Returns the number of severity tiers currently configured.
-    /// Off-chain consumers can inspect retention state without fetching the full map.
+    /// Returns the number of configured severity tiers.
+    /// Off-chain consumers can inspect config state without fetching the full map.
     /// This is an O(1) read: the count is cached alongside CONFIG_KEY (#606).
     pub fn get_config_count(env: Env) -> Result<u32, SLAError> {
-        history::get_config_count(&env)
+        Self::check_version(&env)?;
+        Ok(env.storage().instance().get(&CONFIG_COUNT_KEY).unwrap_or(0))
     }
 
     /// Returns the current storage schema version so off-chain consumers can
@@ -3997,7 +4021,6 @@ impl SLACalculatorContract {
     /// below the current history length prunes the oldest entries right away
     /// (emitting a `pruned` event after `ret_lim`); raising it never trims.
     pub fn set_retention_limit(env: Env, caller: Address, limit: u32) -> Result<(), SLAError> {
-        history::set_retention_limit(&env, &caller, limit)
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
         Self::require_not_frozen(&env)?;
@@ -4021,15 +4044,12 @@ impl SLACalculatorContract {
     /// Returns the current configurable retention limit.
     /// Defaults to MAX_HISTORY_SIZE (1000) if never explicitly set.
     pub fn get_retention_limit(env: Env) -> Result<u32, SLAError> {
-        history::get_retention_limit(&env)
-    }
-
-    /// Internal helper to update history and maintain cached length atomically.
-    /// Addresses issue #463: allows get_full_audit_state to report history_len
-    /// without deserializing the full vector, keeping "one-shot bootstrap" cheap.
-    fn update_history_and_cache(env: &Env, history: &Vec<SLAResult>) {
-        env.storage().instance().set(&HISTORY_KEY, history);
-        env.storage().instance().set(&HISTORY_LEN_KEY, &history.len());
+        Self::check_version(&env)?;
+        Ok(env
+            .storage()
+            .instance()
+            .get(&RETENTION_LIMIT_KEY)
+            .unwrap_or(MAX_HISTORY_SIZE))
     }
 
     /// SC-021 – Migration state read helper

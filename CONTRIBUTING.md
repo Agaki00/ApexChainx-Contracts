@@ -905,6 +905,7 @@ All storage keys use 9-character-or-shorter `Symbol` constants defined with
 | `STORAGE_VERSION_KEY` | `"VER"` | Current on-chain storage schema version |
 | `RETENTION_LIMIT_KEY` | `"RETLIM"` | Configurable retention limit override |
 | `LAST_CFG_UPDATE_KEY` | (from config_metadata) | Ledger sequence of last config update |
+| `LCFG_UPD_ACTOR_KEY` | (from config_metadata) | Admin address of last config update (#671) |
 
 ### Reference: Current Event Topic Namespace (`apexchainx_calculator/src/event_schema.rs`)
 

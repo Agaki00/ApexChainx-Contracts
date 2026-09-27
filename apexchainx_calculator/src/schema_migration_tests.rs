@@ -246,6 +246,49 @@ mod tests {
         );
     }
 
+    /// **#671 – v3 → v4 migration: config-update actor attribution is
+    /// backward compatible.** A v3 contract has a recorded config-update
+    /// sequence but no actor key. After `migrate()` the storage version is
+    /// current and the metadata getter still returns the recorded sequence,
+    /// now reporting `actor: None` ("recorded before attribution existed").
+    #[test]
+    fn test_v3_to_v4_migration_preserves_sequence_without_actor() {
+        use crate::{config_metadata, STORAGE_VERSION};
+
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(&env, &cid);
+        let admin = soroban_sdk::Address::generate(&env);
+        let op = soroban_sdk::Address::generate(&env);
+        client.initialize(&admin, &op);
+
+        // Synthesize the v3 metadata shape: a recorded sequence with no
+        // actor key (v3 contracts never wrote one).
+        env.as_contract(&cid, || {
+            env.storage()
+                .instance()
+                .set(&crate::STORAGE_VERSION_KEY, &3u32);
+            config_metadata::record_config_update_legacy_sequence(&env, 1234);
+        });
+
+        // Migrate v3 → v4.
+        client.migrate(&admin);
+
+        let post = client.get_migration_state();
+        assert_eq!(post.stored_version, STORAGE_VERSION);
+        assert!(!post.needs_migration);
+
+        // The recorded sequence survives; the actor is reported as None
+        // rather than failing to decode or misattributing a zero address.
+        let recorded = client.get_last_config_update().unwrap();
+        assert_eq!(recorded.sequence, 1234);
+        assert_eq!(
+            recorded.actor, None,
+            "pre-v4 updates must report actor: None, never a fabricated address"
+        );
+    }
+
     // Multi-arm migration harness and chaining test pattern (#505)
     // -----------------------------------------------------------------------
 

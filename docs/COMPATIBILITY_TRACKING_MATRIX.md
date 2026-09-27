@@ -81,7 +81,7 @@ transactions.
 
 | Field | Current Value | Notes |
 |-------|--------------|-------|
-| `storage_version` | 2 | Value from `STORAGE_VERSION_KEY` |
+| `storage_version` | 4 | Value from `STORAGE_VERSION_KEY`. v4 adds `LCFGUPDA` — config-update actor attribution (#671) |
 | `result_schema_version` | 1 | Value from `RESULT_SCHEMA_VERSION` |
 | `needs_migration` | `false` | `true` when storage ≠ expected |
 | `is_paused` | varies | Runtime-dependent |

@@ -189,6 +189,46 @@
       ]
     ],
     [],
+    [],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "freeze_config",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "unfreeze_config",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
     []
   ],
   "ledger": {
@@ -252,6 +292,14 @@
                             "hi": 0,
                             "lo": 0
                           }
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "CFGCNT"
+                        },
+                        "val": {
+                          "u32": 4
                         }
                       },
                       {
@@ -429,6 +477,14 @@
                       },
                       {
                         "key": {
+                          "symbol": "FREEZE"
+                        },
+                        "val": {
+                          "bool": false
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "HISTH"
                         },
                         "val": {
@@ -519,7 +575,7 @@
                           "symbol": "VER"
                         },
                         "val": {
-                          "u32": 3
+                          "u32": 4
                         }
                       },
                       {
@@ -573,7 +629,7 @@
                                 "symbol": "config_version_hash"
                               },
                               "val": {
-                                "u64": 1417728228875630226
+                                "u64": 798444132879389521
                               }
                             },
                             {
@@ -664,7 +720,7 @@
                                 "symbol": "config_version_hash"
                               },
                               "val": {
-                                "u64": 1417728228875630226
+                                "u64": 798444132879389521
                               }
                             },
                             {
@@ -755,7 +811,7 @@
                                 "symbol": "config_version_hash"
                               },
                               "val": {
-                                "u64": 1417728228875630226
+                                "u64": 798444132879389521
                               }
                             },
                             {
@@ -846,7 +902,7 @@
                                 "symbol": "config_version_hash"
                               },
                               "val": {
-                                "u64": 1417728228875630226
+                                "u64": 798444132879389521
                               }
                             },
                             {
@@ -937,7 +993,7 @@
                                 "symbol": "config_version_hash"
                               },
                               "val": {
-                                "u64": 1417728228875630226
+                                "u64": 798444132879389521
                               }
                             },
                             {
@@ -1126,6 +1182,72 @@
                 "key": {
                   "ledger_key_nonce": {
                     "nonce": 801925984706572462
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6311999
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+            "key": {
+              "ledger_key_nonce": {
+                "nonce": 5806905060045992000
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 5806905060045992000
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6311999
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+            "key": {
+              "ledger_key_nonce": {
+                "nonce": 6277191135259896685
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 6277191135259896685
                   }
                 },
                 "durability": "temporary",
@@ -1453,7 +1575,7 @@
               }
             ],
             "data": {
-              "u64": 1364
+              "u64": 1380
             }
           }
         }
@@ -1517,7 +1639,7 @@
                     "symbol": "footprint_bytes"
                   },
                   "val": {
-                    "u64": 1364
+                    "u64": 1380
                   }
                 },
                 {
@@ -1627,7 +1749,7 @@
                   "symbol": "top"
                 },
                 {
-                  "u64": 1417728228875630226
+                  "u64": 798444132879389521
                 },
                 {
                   "u64": 0
@@ -1684,10 +1806,13 @@
                   "symbol": "top"
                 },
                 {
-                  "u64": 1417728228875630226
+                  "u64": 798444132879389521
                 },
                 {
                   "u64": 0
+                },
+                {
+                  "u64": 5219946412249689285
                 }
               ]
             }
@@ -1729,7 +1854,7 @@
                     "symbol": "config_version_hash"
                   },
                   "val": {
-                    "u64": 1417728228875630226
+                    "u64": 798444132879389521
                   }
                 },
                 {
@@ -1879,7 +2004,7 @@
                   "symbol": "top"
                 },
                 {
-                  "u64": 1417728228875630226
+                  "u64": 798444132879389521
                 },
                 {
                   "u64": 0
@@ -1936,10 +2061,13 @@
                   "symbol": "top"
                 },
                 {
-                  "u64": 1417728228875630226
+                  "u64": 798444132879389521
                 },
                 {
                   "u64": 0
+                },
+                {
+                  "u64": 5220902987366043630
                 }
               ]
             }
@@ -1981,7 +2109,7 @@
                     "symbol": "config_version_hash"
                   },
                   "val": {
-                    "u64": 1417728228875630226
+                    "u64": 798444132879389521
                   }
                 },
                 {
@@ -2131,7 +2259,7 @@
                   "symbol": "top"
                 },
                 {
-                  "u64": 1417728228875630226
+                  "u64": 798444132879389521
                 },
                 {
                   "u64": 0
@@ -2188,10 +2316,13 @@
                   "symbol": "top"
                 },
                 {
-                  "u64": 1417728228875630226
+                  "u64": 798444132879389521
                 },
                 {
                   "u64": 0
+                },
+                {
+                  "u64": 5221859562482397975
                 }
               ]
             }
@@ -2233,7 +2364,7 @@
                     "symbol": "config_version_hash"
                   },
                   "val": {
-                    "u64": 1417728228875630226
+                    "u64": 798444132879389521
                   }
                 },
                 {
@@ -2383,7 +2514,7 @@
                   "symbol": "top"
                 },
                 {
-                  "u64": 1417728228875630226
+                  "u64": 798444132879389521
                 },
                 {
                   "u64": 0
@@ -2440,10 +2571,13 @@
                   "symbol": "top"
                 },
                 {
-                  "u64": 1417728228875630226
+                  "u64": 798444132879389521
                 },
                 {
                   "u64": 0
+                },
+                {
+                  "u64": 5215163536667917560
                 }
               ]
             }
@@ -2485,7 +2619,7 @@
                     "symbol": "config_version_hash"
                   },
                   "val": {
-                    "u64": 1417728228875630226
+                    "u64": 798444132879389521
                   }
                 },
                 {
@@ -2635,7 +2769,7 @@
                   "symbol": "top"
                 },
                 {
-                  "u64": 1417728228875630226
+                  "u64": 798444132879389521
                 },
                 {
                   "u64": 0
@@ -2692,10 +2826,13 @@
                   "symbol": "top"
                 },
                 {
-                  "u64": 1417728228875630226
+                  "u64": 798444132879389521
                 },
                 {
                   "u64": 0
+                },
+                {
+                  "u64": 5216120111784271905
                 }
               ]
             }
@@ -2737,7 +2874,7 @@
                     "symbol": "config_version_hash"
                   },
                   "val": {
-                    "u64": 1417728228875630226
+                    "u64": 798444132879389521
                   }
                 },
                 {
@@ -2843,7 +2980,7 @@
               }
             ],
             "data": {
-              "u64": 2264
+              "u64": 2280
             }
           }
         }
@@ -2907,7 +3044,7 @@
                     "symbol": "footprint_bytes"
                   },
                   "val": {
-                    "u64": 2264
+                    "u64": 2280
                   }
                 },
                 {
@@ -2927,6 +3064,242 @@
                   }
                 }
               ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
+              },
+              {
+                "symbol": "freeze_config"
+              }
+            ],
+            "data": {
+              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "cfg_frz"
+              },
+              {
+                "symbol": "v1"
+              },
+              {
+                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+              }
+            ],
+            "data": "void"
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "freeze_config"
+              }
+            ],
+            "data": "void"
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
+              },
+              {
+                "symbol": "get_storage_footprint_estimate"
+              }
+            ],
+            "data": "void"
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "get_storage_footprint_estimate"
+              }
+            ],
+            "data": {
+              "u64": 2300
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
+              },
+              {
+                "symbol": "unfreeze_config"
+              }
+            ],
+            "data": {
+              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "cfg_unfrz"
+              },
+              {
+                "symbol": "v1"
+              },
+              {
+                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+              }
+            ],
+            "data": "void"
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "unfreeze_config"
+              }
+            ],
+            "data": "void"
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
+              },
+              {
+                "symbol": "get_storage_footprint_estimate"
+              }
+            ],
+            "data": "void"
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "get_storage_footprint_estimate"
+              }
+            ],
+            "data": {
+              "u64": 2280
             }
           }
         }

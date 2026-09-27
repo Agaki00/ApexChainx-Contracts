@@ -193,12 +193,12 @@ mod auth_matrix_tests {
         let _ = stranger;
         // A stranger may deterministically replay a decision.
         let (result, _hash) = client.replay_calculate_sla(
-            &symbol_short!("OUT_REPLAY"),
+            &symbol_short!("OUT_RPL"),
             &symbol_short!("high"),
             &10,
             &0,
         );
-        assert_eq!(result.outage_id, symbol_short!("OUT_REPLAY"));
+        assert_eq!(result.outage_id, symbol_short!("OUT_RPL"));
     }
 
     /// Replay is public because it is a pure read; it must never carry write
@@ -210,7 +210,7 @@ mod auth_matrix_tests {
         let (_, _, client) = setup(&env);
         let before_stats = client.get_stats();
         client.replay_calculate_sla(
-            &symbol_short!("OUT_REPLAY"),
+            &symbol_short!("OUT_RPL"),
             &symbol_short!("high"),
             &10,
             &0,

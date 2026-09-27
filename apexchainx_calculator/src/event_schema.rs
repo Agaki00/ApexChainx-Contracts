@@ -560,45 +560,6 @@ mod tests {
                     event_name,
                     ident
                 ));
-        // (event name string, source identifier of the emitting constant).
-        let catalog: [(&str, &str); 26] = [
-            ("sla_calc", "EVENT_SLA_CALC"),
-            ("set_int", "EVENT_SETTLE_INTENT"),
-            ("cfg_upd", "EVENT_CONFIG_UPD"),
-            ("cfg_rem", "EVENT_CONFIG_REM"),
-            ("paused", "EVENT_PAUSED"),
-            ("unpause", "EVENT_UNPAUSED"),
-            ("op_set", "EVENT_OP_SET"),
-            ("pruned", "EVENT_PRUNED"),
-            ("pruned_a", "EVENT_PRUNED_AGE"),
-            ("adm_prop", "EVENT_ADMIN_PROP"),
-            ("adm_acc", "EVENT_ADMIN_ACC"),
-            ("adm_can", "EVENT_ADMIN_CAN"),
-            ("adm_ren", "EVENT_ADMIN_REN"),
-            ("adm_sup", "EVENT_ADMIN_SUP"),
-            ("adm_xp", "EVENT_ADMIN_XP"),
-            ("op_prop", "EVENT_OP_PROP"),
-            ("op_acc", "EVENT_OP_ACC"),
-            ("op_can", "EVENT_OP_CAN"),
-            ("op_sup", "EVENT_OP_SUP"),
-            ("op_xp", "EVENT_OP_XP"),
-            ("cfg_frz", "EVENT_CONFIG_FREEZE"),
-            ("cfg_unfrz", "EVENT_CONFIG_UNFREEZE"),
-            ("stats_sat", "EVENT_STATS_SAT"),
-            ("dup_input", "EVENT_DUP_INPUT"),
-            ("mig_done", "EVENT_MIGRATE_DONE"),
-            ("ret_lim", "EVENT_RET_LIM"),
-        ];
-
-        let src_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut sources: Vec<String> = Vec::new();
-        for entry in std::fs::read_dir(&src_dir).expect("src/ readable for emit-site audit") {
-            let entry = entry.expect("read_dir entry");
-            let fname = entry.file_name().to_string_lossy().into_owned();
-            // Skip this schema catalog and the api_stability guardrail: both are
-            // *declaration* sites, not emit sites.
-            if fname == "event_schema.rs" || fname == "api_stability.rs" || !fname.ends_with(".rs") {
-                continue;
             }
         }
         assert!(failures.is_empty(), "{}", failures.join("\n"));
