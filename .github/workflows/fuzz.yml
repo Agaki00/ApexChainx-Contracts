@@ -22,7 +22,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  FUZZ_DURATION: ${{ github.event.inputs.duration || '600' }}
+  # Branch verification is a two-minute smoke run; scheduled campaigns stay ten minutes.
+  FUZZ_DURATION: ${{ github.event.inputs.duration || (github.event_name == 'push' && '120') || '600' }}
   FUZZ_SEED: ${{ github.event.inputs.seed || '' }}
 
 jobs:
@@ -114,7 +115,7 @@ jobs:
           echo "## Fuzz Test Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Target:** \`${{ matrix.target }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Duration:** ${{ env.FUZZ_DURATION }}s" >> $GITHUB_STEP_SUMMARY
+          echo "**Duration:** ${FUZZ_DURATION}s" >> $GITHUB_STEP_SUMMARY
           echo "**Seed:** \`${{ steps.seed.outputs.seed }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Corpus" >> $GITHUB_STEP_SUMMARY
@@ -214,7 +215,7 @@ jobs:
             - [ ] Root-cause (implementation vs spec — see docs/FUZZING_GUARANTEES.md)
             - [ ] Land the fix with a corpus seed added
             - [ ] Delete the report marker for this hash so the crash stops being re-filed
-            EOF
+          EOF
             sed -i 's/^[[:space:]]*//' "$BODY"
             gh issue create \
               --title "Fuzz crash: ${{ matrix.target }} sha256:${HASH:0:12}" \
