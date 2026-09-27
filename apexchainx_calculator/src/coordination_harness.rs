@@ -307,15 +307,17 @@ mod coordination_harness_tests {
             sla_topic.3, settle_topic.3,
             "Step 4: Correlation id must match across contracts (#576)"
         );
-        // Step 4: The workflow's correlation id is deterministic and never
-        // shared with a different outage in the same ledger, so downstream
-        // settlement events can be traced to exactly one incident (SC-W5-079,
-        // #564). It is carried in the `set_int` payload (event_schema.rs).
+        // Step 4: Repeat pairs reproduce the tracing hint. These sample outage
+        // fingerprints differ; general within-ledger collisions remain possible.
+        // Join on full outage/ledger context, not only the compact ID (#677).
         let rederived = event_correlation::generate_correlation_id(&env, &outage_id, ledger_seq);
         assert_eq!(corr_id, rederived, "Step 4: Correlation ID must be deterministic");
         let other_outage = Symbol::new(&env, "WF_2024_002");
         let other_id = event_correlation::generate_correlation_id(&env, &other_outage, ledger_seq);
-        assert_ne!(corr_id, other_id, "Step 4: Distinct outages must not share an id");
+        assert_ne!(
+            corr_id, other_id,
+            "Step 4: These sample outage fingerprints must differ"
+        );
     }
 
     // ===================================================================

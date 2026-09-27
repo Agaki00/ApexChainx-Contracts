@@ -176,8 +176,7 @@ mod auth_matrix_tests {
         let env = Env::default();
         let (_, _, client) = setup(&env);
         // A stranger (no role) may perform a live view evaluation.
-        let result =
-            client.calculate_sla_view(&symbol_short!("OUT_VIEW"), &symbol_short!("high"), &10);
+        let result = client.calculate_sla_view(&symbol_short!("OUT_VIEW"), &symbol_short!("high"), &10);
         assert_eq!(result.outage_id, symbol_short!("OUT_VIEW"));
         // View must never write history or stats.
         let stats = client.get_stats();
@@ -192,13 +191,9 @@ mod auth_matrix_tests {
         let stranger = Address::generate(&env);
         let _ = stranger;
         // A stranger may deterministically replay a decision.
-        let (result, _hash) = client.replay_calculate_sla(
-            &symbol_short!("OUT_REPLAY"),
-            &symbol_short!("high"),
-            &10,
-            &0,
-        );
-        assert_eq!(result.outage_id, symbol_short!("OUT_REPLAY"));
+        let (result, _hash) =
+            client.replay_calculate_sla(&Symbol::new(&env, "OUT_REPLAY"), &symbol_short!("high"), &10, &0);
+        assert_eq!(result.outage_id, Symbol::new(&env, "OUT_REPLAY"));
     }
 
     /// Replay is public because it is a pure read; it must never carry write
@@ -209,13 +204,11 @@ mod auth_matrix_tests {
         let env = Env::default();
         let (_, _, client) = setup(&env);
         let before_stats = client.get_stats();
-        client.replay_calculate_sla(
-            &symbol_short!("OUT_REPLAY"),
-            &symbol_short!("high"),
-            &10,
-            &0,
+        client.replay_calculate_sla(&Symbol::new(&env, "OUT_REPLAY"), &symbol_short!("high"), &10, &0);
+        assert_eq!(
+            client.get_stats().total_calculations,
+            before_stats.total_calculations
         );
-        assert_eq!(client.get_stats().total_calculations, before_stats.total_calculations);
         assert_eq!(client.get_history().len(), 0);
     }
 

@@ -51,7 +51,7 @@ use crate::{SLAConfigSnapshot, SLAResultSchema};
 /// Written on every `get_config_bundle` call that recomposes the bundle
 /// (i.e. when the current config hash differs from the cached hash).
 /// Removed by `invalidate_config_bundle_cache` on any config write.
-pub(crate) const BUNDLE_CACHE_KEY: Symbol = symbol_short!(\"BNDLCCH\");
+pub(crate) const BUNDLE_CACHE_KEY: Symbol = symbol_short!("BNDLCCH");
 
 /// Combined configuration and schema bundle for backend consumption.
 ///
@@ -101,8 +101,8 @@ pub fn read_config_bundle(env: &Env, current_hash: u64) -> Option<ConfigBundle> 
     }
 
     // Recompose the bundle with the current snapshot and schema.
-    let snapshot = crate::SLACalculatorContract::build_config_snapshot(env)?;
-    let schema = crate::SLACalculatorContract::build_result_schema(env);
+    let snapshot = crate::SLACalculatorContract::build_config_snapshot(env).ok()?;
+    let schema = crate::SLACalculatorContract::get_result_schema(env.clone()).ok()?;
     let bundle = ConfigBundle {
         snapshot,
         schema,
@@ -229,9 +229,7 @@ mod tests {
     fn test_config_bundle_cache_serves_unchanged_hash_reads() {
         let (_env, client, admin) = setup();
 
-        let first = client
-            .get_config_bundle()
-            .expect("bundle available after init");
+        let first = client.get_config_bundle().expect("bundle available after init");
 
         // Second read with unchanged config — same hash, same bundle.
         let second = client
@@ -246,9 +244,7 @@ mod tests {
         // Mutate config — cache must be invalidated.
         client.set_config(&admin, &symbol_short!("high"), &50, &60, &800);
 
-        let after_write = client
-            .get_config_bundle()
-            .expect("bundle available after write");
+        let after_write = client.get_config_bundle().expect("bundle available after write");
 
         assert_ne!(
             first.config_version_hash, after_write.config_version_hash,

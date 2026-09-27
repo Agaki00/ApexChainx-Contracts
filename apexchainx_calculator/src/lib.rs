@@ -37,9 +37,6 @@ pub mod audit_state;
 #[cfg(test)]
 mod auth_matrix_tests;
 
-/// #610 – severity-curve boundary fixtures (see docs/SEVERITY_CURVES.md).
-#[cfg(test)]
-mod severity_curve_tests;
 pub mod calculation;
 pub mod config;
 pub mod config_bundle;
@@ -90,8 +87,9 @@ mod prune_benchmark;
 mod pruning_perf;
 #[cfg(test)]
 mod schema_migration_tests;
+/// #610 – severity-curve boundary fixtures (see docs/SEVERITY_CURVES.md).
 #[cfg(test)]
-mod storage_key_invariant_tests;
+mod severity_curve_tests;
 /// Executable restatement of the contract's documented pure semantics —
 /// the single source of truth imported by tests, the fuzz targets, and the
 /// TypeScript parity fixtures instead of being re-derived in each.
@@ -99,6 +97,8 @@ pub mod spec;
 pub mod storage_estimation;
 #[cfg(test)]
 mod storage_footprint_tests;
+#[cfg(test)]
+mod storage_key_invariant_tests;
 pub mod storage_version;
 #[cfg(test)]
 mod threshold_config;
@@ -257,11 +257,12 @@ pub(crate) const STORAGE_VERSION_KEY: Symbol = symbol_short!("VER");
 // This must stay in lockstep with migrate(): a deployed v2 contract has
 // history/configs in the pre-v3 shapes but not the sharded history keys or
 // the cached config count.
-pub(crate) const STORAGE_VERSION: u32 = 3;
+// v4 coordinates the per-name event ABI and ledger-bound correlation encoding.
+pub(crate) const STORAGE_VERSION: u32 = 4;
 
 /// Version of the SLAResult schema exposed via get_result_schema().
 /// Incremented when result encoding changes in a breaking way.
-pub(crate) const RESULT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const RESULT_SCHEMA_VERSION: u32 = 2;
 
 /// Number of named fields in `SLAResult`.
 ///
@@ -313,6 +314,7 @@ pub const MAX_MTTR: u32 = 525_600;
 /// (#409), where the pagination spec and fuzz-spec invariants read it from.
 /// Re-exported here so the crate root keeps one stable name for it and no
 /// second value can drift (#597).
+#[cfg(test)]
 pub(crate) use crate::history::MAX_PAGE_SIZE;
 
 /// Polynomial base for config version hashing (`compute_config_version_hash`,
@@ -643,9 +645,6 @@ pub(crate) const EVENT_STATS_SAT: Symbol = symbol_short!("stats_sat");
 /// rating, config_version_hash, recorded_at). Field additions go at the end;
 /// reordering, removal, or type changes require a version bump.
 pub(crate) const EVENT_DUP_INPUT: Symbol = symbol_short!("dup_input");
-
-/// Canonical event version symbol used by all events.
-pub(crate) const EVENT_VERSION: Symbol = symbol_short!("v1");
 
 // -----------------------------------------------------------------------
 // Error Codes
@@ -1423,9 +1422,7 @@ impl SLACalculatorContract {
         env.storage().instance().set(&CONFIG_KEY, &configs);
         // #606 – Seed the cached config count alongside the map so the count
         // endpoint reads O(1) instead of deserializing the whole map.
-        env.storage()
-            .instance()
-            .set(&CONFIG_COUNT_KEY, &configs.len());
+        env.storage().instance().set(&CONFIG_COUNT_KEY, &configs.len());
         // #455 – Seed CUSTOM_CONFIG_KEY so fresh and migrated contracts
         // have the same instance-storage key layout.
         env.storage()
@@ -1535,9 +1532,7 @@ impl SLACalculatorContract {
         // Derived once from the source-of-truth map during bootstrap; hot-path
         // reads thereafter use the counter directly (HISTORY_LEN_KEY pattern).
         if !inst.has(&CONFIG_COUNT_KEY) {
-            let configs: Map<Symbol, SLAConfig> = inst
-                .get(&CONFIG_KEY)
-                .unwrap_or_else(|| Map::new(env));
+            let configs: Map<Symbol, SLAConfig> = inst.get(&CONFIG_KEY).unwrap_or_else(|| Map::new(env));
             inst.set(&CONFIG_COUNT_KEY, &configs.len());
         }
     }
@@ -1638,6 +1633,13 @@ impl SLACalculatorContract {
             current = 3;
         }
 
+        // v4 is the coordinated event-ABI release (#497/#675). Storage bytes
+        // are unchanged; the explicit stamp requires an admin upgrade acknowledgement.
+        if current == 3 {
+            env.storage().instance().set(&STORAGE_VERSION_KEY, &4u32);
+            current = 4;
+        }
+
         // Sanity: after all steps we must be at STORAGE_VERSION
         if current != STORAGE_VERSION {
             return Err(SLAError::VersionMismatch);
@@ -1646,7 +1648,7 @@ impl SLACalculatorContract {
         env.events().publish(
             (
                 event_schema::EVENT_MIGRATE_DONE,
-                event_schema::EVENT_VERSION,
+                event_schema::event_version(event_schema::EVENT_MIGRATE_DONE),
                 caller,
             ),
             (stored, current),
@@ -1800,8 +1802,14 @@ impl SLACalculatorContract {
                 paused_by: caller.clone(),
             },
         );
-        env.events()
-            .publish((EVENT_PAUSED, EVENT_VERSION, caller), (true,));
+        env.events().publish(
+            (
+                EVENT_PAUSED,
+                crate::event_schema::event_version(EVENT_PAUSED),
+                caller,
+            ),
+            (true,),
+        );
         Ok(())
     }
 
@@ -1813,8 +1821,14 @@ impl SLACalculatorContract {
 
         env.storage().instance().set(&PAUSED_KEY, &false);
         env.storage().instance().remove(&PAUSE_INFO_KEY);
-        env.events()
-            .publish((EVENT_UNPAUSED, EVENT_VERSION, caller), (false,));
+        env.events().publish(
+            (
+                EVENT_UNPAUSED,
+                crate::event_schema::event_version(EVENT_UNPAUSED),
+                caller,
+            ),
+            (false,),
+        );
         Ok(())
     }
 
@@ -1842,8 +1856,14 @@ impl SLACalculatorContract {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
         if config_freeze::freeze_config(&env) {
-            env.events()
-                .publish((EVENT_CONFIG_FREEZE, EVENT_VERSION, caller), ());
+            env.events().publish(
+                (
+                    EVENT_CONFIG_FREEZE,
+                    crate::event_schema::event_version(EVENT_CONFIG_FREEZE),
+                    caller,
+                ),
+                (),
+            );
         }
         Ok(())
     }
@@ -1856,8 +1876,14 @@ impl SLACalculatorContract {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
         if config_freeze::unfreeze_config(&env) {
-            env.events()
-                .publish((EVENT_CONFIG_UNFREEZE, EVENT_VERSION, caller), ());
+            env.events().publish(
+                (
+                    EVENT_CONFIG_UNFREEZE,
+                    crate::event_schema::event_version(EVENT_CONFIG_UNFREEZE),
+                    caller,
+                ),
+                (),
+            );
         }
         Ok(())
     }
@@ -1913,9 +1939,7 @@ impl SLACalculatorContract {
         env.storage().instance().set(&CONFIG_KEY, &configs);
         // Issue #606 – keep the cached config count in lockstep with the map
         // so get_config_count stays an O(1) read.
-        env.storage()
-            .instance()
-            .set(&CONFIG_COUNT_KEY, &configs.len());
+        env.storage().instance().set(&CONFIG_COUNT_KEY, &configs.len());
 
         // Issue #4 – stamp the ledger sequence of the most recent config
         // update so backends can detect when their cached configuration is
@@ -1928,7 +1952,11 @@ impl SLACalculatorContract {
         Self::record_config_registry(&env)?;
 
         env.events().publish(
-            (EVENT_CONFIG_UPD, EVENT_VERSION, severity),
+            (
+                EVENT_CONFIG_UPD,
+                crate::event_schema::event_version(EVENT_CONFIG_UPD),
+                severity,
+            ),
             (threshold_minutes, penalty_per_minute, reward_base),
         );
         Ok(())
@@ -2002,7 +2030,11 @@ impl SLACalculatorContract {
         // lifecycle distinction check topic[0].
         let event_name = if is_update { EVENT_SEV_UPD } else { EVENT_SEV_ADD };
         env.events().publish(
-            (event_name, EVENT_VERSION, severity),
+            (
+                event_name.clone(),
+                crate::event_schema::event_version(event_name),
+                severity,
+            ),
             (threshold_minutes, penalty_per_minute, reward_base),
         );
         Ok(())
@@ -2028,8 +2060,14 @@ impl SLACalculatorContract {
         custom.remove(severity.clone());
         env.storage().instance().set(&CUSTOM_CONFIG_KEY, &custom);
 
-        env.events()
-            .publish((EVENT_CONFIG_REM, EVENT_VERSION, severity), ());
+        env.events().publish(
+            (
+                EVENT_CONFIG_REM,
+                crate::event_schema::event_version(EVENT_CONFIG_REM),
+                severity,
+            ),
+            (),
+        );
         Ok(())
     }
 
@@ -2227,8 +2265,12 @@ impl SLACalculatorContract {
     /// Returns the result schema descriptor for backend symbol mapping.
     pub fn get_result_schema(env: Env) -> Result<SLAResultSchema, SLAError> {
         Self::check_version(&env)?;
-        Ok(SLAResultSchema {
-            version: symbol_short!("v1"),
+        Ok(Self::build_result_schema(&env))
+    }
+
+    fn build_result_schema(env: &Env) -> SLAResultSchema {
+        SLAResultSchema {
+            version: symbol_short!("v2"),
             schema_version: RESULT_SCHEMA_VERSION,
             result_field_count: RESULT_SCHEMA_FIELD_COUNT,
             status_met: symbol_short!("met"),
@@ -2240,9 +2282,9 @@ impl SLACalculatorContract {
             rating_good: symbol_short!("good"),
             rating_poor: symbol_short!("poor"),
             includes_config_version_hash: true,
-            deprecated_symbols: Vec::new(&env),
-            severity_aliases: Vec::new(&env),
-        })
+            deprecated_symbols: Vec::new(env),
+            severity_aliases: Vec::new(env),
+        }
     }
 
     /// #1 – Combined configuration snapshot and result schema for one-shot
@@ -2302,22 +2344,7 @@ impl SLACalculatorContract {
         // Issue #463: use cached history length instead of materializing full vector
         let history_len: u32 = env.storage().instance().get(&HISTORY_LEN_KEY).unwrap_or(0);
 
-        let result_schema = SLAResultSchema {
-            version: symbol_short!("v1"),
-            schema_version: RESULT_SCHEMA_VERSION,
-            result_field_count: RESULT_SCHEMA_FIELD_COUNT,
-            status_met: symbol_short!("met"),
-            status_violated: symbol_short!("viol"),
-            payment_reward: symbol_short!("rew"),
-            payment_penalty: symbol_short!("pen"),
-            rating_exceptional: symbol_short!("top"),
-            rating_excellent: symbol_short!("excel"),
-            rating_good: symbol_short!("good"),
-            rating_poor: symbol_short!("poor"),
-            includes_config_version_hash: true,
-            deprecated_symbols: Vec::new(&env),
-            severity_aliases: Vec::new(&env),
-        };
+        let result_schema = Self::build_result_schema(&env);
 
         Ok(AuditState {
             admin,
@@ -2462,6 +2489,7 @@ impl SLACalculatorContract {
         methods.push_back(method("get_config_bundle", false, "none", ""));
         methods.push_back(method("get_config_count", false, "none", ""));
         methods.push_back(method("get_config_snapshot", false, "none", ""));
+        methods.push_back(method("get_config_snapshot_by_version", false, "none", ""));
         methods.push_back(method("get_config_version_hash", false, "none", ""));
         methods.push_back(method("get_contract_info", false, "none", ""));
         methods.push_back(method("get_contract_metadata", false, "none", ""));
@@ -2486,7 +2514,6 @@ impl SLACalculatorContract {
         methods.push_back(method("get_rent_estimate", false, "none", ""));
         methods.push_back(method("get_result_schema", false, "none", ""));
         methods.push_back(method("get_retention_limit", false, "none", ""));
-        methods.push_back(method("get_retention_metrics", false, "none", ""));
         methods.push_back(method("get_severity_telemetry", false, "none", ""));
         methods.push_back(method("get_stats", false, "none", ""));
         methods.push_back(method("get_storage_footprint_estimate", false, "none", ""));
@@ -2680,7 +2707,7 @@ impl SLACalculatorContract {
         // is only appended when trailing a registered custom severity or when
         // the dedicated `CUSTEL` lane carries any counters.
         let custom_counters = Self::load_counts(&env, &CUSTOM_TELEMETRY_KEY);
-        if custom.len() > 0 || custom_counters != 0 {
+        if !custom.is_empty() || custom_counters != 0 {
             let calc_count = Self::count_lane(custom_counters, 0);
             let violation_count = Self::count_lane(custom_counters, 1);
             let violation_rate = if calc_count == 0 {
@@ -2935,7 +2962,13 @@ impl SLACalculatorContract {
                     // #385 – publish the stored result alongside the rejection so
                     // consumers can reconcile the conflict from this transaction's
                     // event log without a second get_latest_by_outage read.
-                    Self::publish_duplicate_input_event(&env, severity.clone(), &prev, mttr_minutes, cfg.threshold_minutes);
+                    Self::publish_duplicate_input_event(
+                        &env,
+                        severity.clone(),
+                        &prev,
+                        mttr_minutes,
+                        cfg.threshold_minutes,
+                    );
                     return Err(SLAError::DuplicateOutageInput);
                 }
                 // Replay: return the stored decision without touching state.
@@ -3566,7 +3599,11 @@ impl SLACalculatorContract {
     /// payload=(field, previous_value, attempted_increment). See event_schema.rs.
     fn emit_stats_saturated(env: &Env, counter: Symbol, previous_value: i128, attempted_increment: i128) {
         env.events().publish(
-            (EVENT_STATS_SAT, EVENT_VERSION, counter.clone()),
+            (
+                EVENT_STATS_SAT,
+                crate::event_schema::event_version(EVENT_STATS_SAT),
+                counter.clone(),
+            ),
             (counter, previous_value, attempted_increment),
         );
     }
@@ -3688,7 +3725,11 @@ impl SLACalculatorContract {
         // Canonical decision field order (#429): shares the SLAResult struct
         // order with set_int and dup_input so indexers parse one layout.
         env.events().publish(
-            (EVENT_SLA_CALC, EVENT_VERSION, severity),
+            (
+                EVENT_SLA_CALC,
+                crate::event_schema::event_version(EVENT_SLA_CALC),
+                severity,
+            ),
             (
                 result.outage_id.clone(),
                 result.status.clone(),
@@ -3713,7 +3754,11 @@ impl SLACalculatorContract {
         // sla_calc and dup_input, and no version bump is required for an
         // additive trailing field (event_schema.rs § Schema Versioning).
         env.events().publish(
-            (EVENT_SETTLE_INTENT, EVENT_VERSION, severity),
+            (
+                EVENT_SETTLE_INTENT,
+                crate::event_schema::event_version(EVENT_SETTLE_INTENT),
+                severity,
+            ),
             (
                 result.outage_id.clone(),
                 result.status.clone(),
@@ -3747,7 +3792,11 @@ impl SLACalculatorContract {
         attempted_threshold_minutes: u32,
     ) {
         env.events().publish(
-            (EVENT_DUP_INPUT, EVENT_VERSION, severity),
+            (
+                EVENT_DUP_INPUT,
+                crate::event_schema::event_version(EVENT_DUP_INPUT),
+                severity,
+            ),
             (
                 existing.outage_id.clone(),
                 existing.status.clone(),
@@ -3771,8 +3820,6 @@ impl SLACalculatorContract {
     /// Returns the raw log of recent SLA calculations stored on-chain.
     pub fn get_history(env: Env) -> Result<Vec<SLAResult>, SLAError> {
         history::get_history(&env)
-        Self::check_version(&env)?;
-        Ok(history::read_all_entries(&env))
     }
 
     /// Prunes the SLA calculation history to prevent indefinite storage growth.
@@ -3784,13 +3831,6 @@ impl SLACalculatorContract {
     /// rewritten (O(dropped) writes), never the whole retained set (#582).
     pub fn prune_history(env: Env, caller: Address, keep_latest: u32) -> Result<(), SLAError> {
         history::prune_history(&env, &caller, keep_latest)
-        Self::check_version(&env)?;
-        Self::require_admin(&env, &caller)?;
-
-        let remove_count = history::prune_oldest(&env, keep_latest);
-        env.events()
-            .publish((EVENT_PRUNED, EVENT_VERSION, caller), (remove_count, keep_latest));
-        Ok(())
     }
 
     /// SC-063 – Prune history entries older than `min_age_seconds` before the
@@ -3803,38 +3843,6 @@ impl SLACalculatorContract {
     /// so the empty-edge case of `recorded_at == 0` does not occur in practice.
     pub fn prune_history_by_age(env: Env, caller: Address, min_age_seconds: u64) -> Result<(), SLAError> {
         history::prune_history_by_age(&env, &caller, min_age_seconds)
-        Self::check_version(&env)?;
-        Self::require_admin(&env, &caller)?;
-
-        let now = env.ledger().timestamp();
-        if min_age_seconds >= now {
-            return Err(SLAError::InvalidInput);
-        }
-        let cutoff = now.saturating_sub(min_age_seconds);
-
-        let history = history::read_all_entries(&env);
-
-        let mut new_history = Vec::new(&env);
-        let mut removed: u32 = 0;
-
-        for i in 0..history.len() {
-            let entry = history.get(i).unwrap();
-            // Keep entries that are recent enough
-            if entry.recorded_at >= cutoff {
-                new_history.push_back(entry);
-            } else {
-                removed += 1;
-            }
-        }
-
-        if removed > 0 {
-            history::rebuild_history(&env, &new_history);
-        }
-        let kept = new_history.len();
-        env.events()
-            .publish((EVENT_PRUNED_AGE, EVENT_VERSION, caller), (removed, kept));
-
-        Ok(())
     }
 
     // -------------------------------------------------------------------
@@ -3869,17 +3877,6 @@ impl SLACalculatorContract {
     /// See `docs/HISTORY_PAGINATION_POLICY.md` for the full policy.
     pub fn get_history_page(env: Env, offset: u32, limit: u32) -> Result<Vec<SLAResult>, SLAError> {
         history::get_history_page(&env, offset, limit)
-        Self::check_version(&env)?;
-        let (head, tail) = (history::head(&env), history::tail(&env));
-        let total = tail.saturating_sub(head);
-        let limit = limit.min(MAX_PAGE_SIZE);
-        if offset >= total || limit == 0 {
-            return Ok(Vec::new(&env));
-        }
-        // Shadow compute_page_slice: clamp the end index with saturating
-        // arithmetic so extreme u32 inputs cannot wrap into a wrong slice.
-        let end_rel = offset.saturating_add(limit).min(total);
-        Ok(history::read_range(&env, head + offset, end_rel - offset))
     }
 
     /// Returns a bounded page of history entries together with pagination
@@ -3898,31 +3895,6 @@ impl SLACalculatorContract {
     /// `docs/HISTORY_PAGINATION_POLICY.md`.
     pub fn get_history_page_with_meta(env: Env, offset: u32, limit: u32) -> Result<HistoryPage, SLAError> {
         history::get_history_page_with_meta(&env, offset, limit)
-        Self::check_version(&env)?;
-        let (head, tail) = (history::head(&env), history::tail(&env));
-        let total = tail.saturating_sub(head);
-        let limit = limit.min(MAX_PAGE_SIZE);
-
-        // Header comment documents offset/limit semantics; the number of
-        // indices read is exactly the page width — no full-history traversal.
-        let mut items = Vec::new(&env);
-        let end_rel = if offset < total && limit != 0 {
-            let end_rel = offset.saturating_add(limit).min(total);
-            items = history::read_range(&env, head + offset, end_rel - offset);
-            end_rel
-        } else {
-            offset.min(total)
-        };
-
-        // `has_more` is true when the requested range stops before the end of
-        // history and limit > 0. When limit == 0, the empty page signals
-        // end-of-history per docs/HISTORY_PAGINATION_POLICY.md.
-        let has_more = if limit == 0 { false } else { end_rel < total };
-        Ok(HistoryPage {
-            items,
-            total,
-            has_more,
-        })
     }
 
     // -------------------------------------------------------------------
@@ -3938,10 +3910,6 @@ impl SLACalculatorContract {
     /// entry in the returned array represents the latest decision.
     pub fn get_history_by_outage(env: Env, outage_id: Symbol) -> Result<Vec<SLAResult>, SLAError> {
         history::get_history_by_outage(&env, outage_id)
-        Self::check_version(&env)?;
-        // Read only the outage's index subset instead of scanning the whole
-        // retained history (#581): cost is proportional to the matching entries.
-        Ok(history::entries_for_outage(&env, &outage_id))
     }
 
     // -------------------------------------------------------------------
@@ -3952,10 +3920,6 @@ impl SLACalculatorContract {
     /// if no entry exists for that outage.
     pub fn get_latest_by_outage(env: Env, outage_id: Symbol) -> Result<Option<SLAResult>, SLAError> {
         history::get_latest_by_outage(&env, outage_id)
-        Self::check_version(&env)?;
-        // The per-outage index stores the newest index last, so this reads a
-        // single entry instead of scanning the whole retained history (#581).
-        Ok(history::latest_for_outage(&env, &outage_id))
     }
 
     // -------------------------------------------------------------------
@@ -3979,11 +3943,7 @@ impl SLACalculatorContract {
     /// the happy path; callers that need to distinguish a genuinely broken
     /// deployment use `get_migration_state` (#599).
     pub fn get_storage_version(env: Env) -> Result<u32, SLAError> {
-        Ok(env
-            .storage()
-            .instance()
-            .get(&STORAGE_VERSION_KEY)
-            .unwrap_or(0))
+        Ok(env.storage().instance().get(&STORAGE_VERSION_KEY).unwrap_or(0))
     }
 
     // -------------------------------------------------------------------
@@ -3998,38 +3958,12 @@ impl SLACalculatorContract {
     /// (emitting a `pruned` event after `ret_lim`); raising it never trims.
     pub fn set_retention_limit(env: Env, caller: Address, limit: u32) -> Result<(), SLAError> {
         history::set_retention_limit(&env, &caller, limit)
-        Self::check_version(&env)?;
-        Self::require_admin(&env, &caller)?;
-        Self::require_not_frozen(&env)?;
-        if limit == 0 || limit > MAX_HISTORY_SIZE {
-            return Err(SLAError::RetentionLimitOutOfRange);
-        }
-        env.storage().instance().set(&RETENTION_LIMIT_KEY, &limit);
-        env.events()
-            .publish((EVENT_RET_LIM, EVENT_VERSION, caller.clone()), (limit,));
-        // Trim the oldest entries down to the new limit in place — survivors
-        // keep their absolute indices, so only the dropped range is rewritten
-        // (O(dropped) writes) rather than a full retained-set sweep (#582).
-        let remove_count = history::prune_oldest(&env, limit);
-        if remove_count > 0 {
-            env.events()
-                .publish((EVENT_PRUNED, EVENT_VERSION, caller), (remove_count, limit));
-        }
-        Ok(())
     }
 
     /// Returns the current configurable retention limit.
     /// Defaults to MAX_HISTORY_SIZE (1000) if never explicitly set.
     pub fn get_retention_limit(env: Env) -> Result<u32, SLAError> {
         history::get_retention_limit(&env)
-    }
-
-    /// Internal helper to update history and maintain cached length atomically.
-    /// Addresses issue #463: allows get_full_audit_state to report history_len
-    /// without deserializing the full vector, keeping "one-shot bootstrap" cheap.
-    fn update_history_and_cache(env: &Env, history: &Vec<SLAResult>) {
-        env.storage().instance().set(&HISTORY_KEY, history);
-        env.storage().instance().set(&HISTORY_LEN_KEY, &history.len());
     }
 
     /// SC-021 – Migration state read helper

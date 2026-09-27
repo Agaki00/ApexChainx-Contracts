@@ -8,8 +8,8 @@
 //! three call sites route through, ensuring consistent event emission,
 //! HISTORY_LEN_KEY maintenance, and removal semantics.
 
-use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
-use crate::{SLAResult, HISTORY_KEY, HISTORY_LEN_KEY, EVENT_PRUNED, EVENT_PRUNED_AGE, EVENT_VERSION};
+use crate::{SLAResult, EVENT_PRUNED, EVENT_PRUNED_AGE};
+use soroban_sdk::{Address, Env, Vec};
 
 /// The reason a trim was triggered — drives event selection.
 pub enum TrimReason {
@@ -38,19 +38,26 @@ pub fn trim_history(
         return;
     }
     let kept = new_history.len();
-    env.storage().instance().set(&HISTORY_KEY, &new_history);
-    env.storage().instance().set(&HISTORY_LEN_KEY, &kept);
+    crate::history::rebuild_history(env, &new_history);
 
     match reason {
         TrimReason::AdminAge => {
             env.events().publish(
-                (EVENT_PRUNED_AGE, EVENT_VERSION, caller.clone()),
+                (
+                    EVENT_PRUNED_AGE,
+                    crate::event_schema::event_version(EVENT_PRUNED_AGE),
+                    caller.clone(),
+                ),
                 (removed_count, kept),
             );
         }
         TrimReason::AdminCount | TrimReason::AutoCapacity => {
             env.events().publish(
-                (EVENT_PRUNED, EVENT_VERSION, caller.clone()),
+                (
+                    EVENT_PRUNED,
+                    crate::event_schema::event_version(EVENT_PRUNED),
+                    caller.clone(),
+                ),
                 (removed_count, kept),
             );
         }

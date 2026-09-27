@@ -16,56 +16,17 @@ use crate::STORAGE_VERSION;
 // against the v3 snapshot below.
 #[allow(dead_code)]
 const KEYS_AT_V2: [&str; 22] = [
-    "ADMIN",
-    "OPERATOR",
-    "PADMIN",
-    "POP",
-    "PADMINTS",
-    "POPTS",
-    "CONFIG",
-    "CUSTCFG",
-    "PAUSED",
-    "PAUSEINF",
-    "STATS",
-    "CALCCNT",
-    "VIOLCNT",
-    "CALCTS",
-    "VIOLTS",
-    "HIST",
-    "HISTLEN",
-    "VER",
-    "RETLIM",
-    "TPRUNED",
-    "TTOTENT",
-    "LCFGUPD",
+    "ADMIN", "OPERATOR", "PADMIN", "POP", "PADMINTS", "POPTS", "CONFIG", "CUSTCFG", "PAUSED", "PAUSEINF",
+    "STATS", "CALCCNT", "VIOLCNT", "CALCTS", "VIOLTS", "HIST", "HISTLEN", "VER", "RETLIM", "TPRUNED",
+    "TTOTENT", "LCFGUPD",
 ];
 
 /// The reserved instance-storage key set as of `STORAGE_VERSION` 3, which adds
 /// `CONFIG_COUNT_KEY` (cached config count for issue #606).
 const KEYS_AT_V3: [&str; 23] = [
-    "ADMIN",
-    "OPERATOR",
-    "PADMIN",
-    "POP",
-    "PADMINTS",
-    "POPTS",
-    "CONFIG",
-    "CUSTCFG",
-    "PAUSED",
-    "PAUSEINF",
-    "STATS",
-    "CALCCNT",
-    "VIOLCNT",
-    "CALCTS",
-    "VIOLTS",
-    "HIST",
-    "HISTLEN",
-    "CFGCNT",
-    "VER",
-    "RETLIM",
-    "TPRUNED",
-    "TTOTENT",
-    "LCFGUPD",
+    "ADMIN", "OPERATOR", "PADMIN", "POP", "PADMINTS", "POPTS", "CONFIG", "CUSTCFG", "PAUSED", "PAUSEINF",
+    "STATS", "CALCCNT", "VIOLCNT", "CALCTS", "VIOLTS", "HIST", "HISTLEN", "CFGCNT", "VER", "RETLIM",
+    "TPRUNED", "TTOTENT", "LCFGUPD",
 ];
 
 /// The `STORAGE_VERSION` the snapshot above was observed at.

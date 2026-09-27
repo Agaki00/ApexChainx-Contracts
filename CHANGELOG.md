@@ -8,6 +8,15 @@
 
 ## [Unreleased]
 
+- Breaking event ABI generation 2 (#675): topics carry per-name versions;
+  `set_int` advances to v2 while unchanged names retain v1. Storage v4 and
+  result schema v2 enforce the global breaking-change co-bump policy (#497).
+- Ledger-bound correlation IDs (#677): upper 32 bits store the ledger sequence,
+  lower 32 bits fingerprint the raw outage symbol. Same-ledger collisions remain
+  possible and are explicitly documented; see docs/EVENT_VERSION_MIGRATION.md.
+- Manifest parity coverage (#678): every public method requires a fixture or an
+  explicit counted skip, and contracttype field changes require inventory review.
+
 ### Changed
 - **`get_config_count` now reads an O(1) cached count instead of deserializing the whole config map** (#606): a new instance-storage key `CONFIG_COUNT_KEY` (`CFGCNT`, storage v3) is maintained alongside every `CONFIG_KEY` write (initialize, `set_config`), backfilled once during `migrate()`'s new v2 → v3 arm and in `init_missing_storage_defaults`. The count endpoint — and `history::get_config_count` — now read the counter directly, preserving the pre-init `NotInitialized` posture. `STORAGE_VERSION` bumped 2 → 3 with the `KEYS_AT_V3` snapshot, `api_stability::storage_key_symbols()` updated to the authoritative 23-key set, and tests pin the cached count across updates plus the v2 → v3 backfill
 - **`get_storage_version` returns a readable pre-init baseline of `0`** (#599) instead of `NotInitialized` when `STORAGE_VERSION_KEY` is absent, so startup probes on a fresh deployment get a value ("no schema, nothing to migrate") rather than an error branch. Stored versions are always `>= 1`, so `0` is unambiguous; genuinely broken deployments are still surfaced via `get_migration_state`. `storage_version.rs` documents the pre/post-init reading semantics
