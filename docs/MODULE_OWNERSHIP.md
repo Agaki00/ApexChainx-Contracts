@@ -8,6 +8,12 @@ This document maps every module, directory, and workflow in the repository to
 its ownership domain so that pull requests can be routed to the correct
 reviewers and merge bottlenecks are reduced.
 
+> **Enforcement (#673):** [`CODEOWNERS`](../.github/CODEOWNERS) encodes the same
+> mapping as review *rules* so GitHub requests the right owner automatically.
+> This document is the human-readable rationale; `CODEOWNERS` is what the
+> platform enforces. When a module moves between domains here, update the
+> matching pattern in `CODEOWNERS` in the same PR.
+
 ---
 
 ## Table of Contents
