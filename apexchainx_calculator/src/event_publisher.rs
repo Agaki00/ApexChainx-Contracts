@@ -1,36 +1,9 @@
-//! Centralized event publishing helpers (Issue #656).
+//! Reusable SLA event publication helpers (Issue #656).
 //!
-//! Previously, events were emitted inline in many contract methods
-//! (`publish_sla_event`, `publish_settlement_intent_event`,
-//! `publish_duplicate_input_event`, governance emits) making the event surface
-//! hard to enumerate and easy to drift from the schema catalog.
-//!
-//! This module provides a single `EventPublisher` struct that every emit-site
-//! routes through. Topic construction, version stamping, and payload layout
-//! all live here — removing the chance that a new emit-site uses a slightly
-//! different topic order or forgets the version symbol.
-//!
-//! # Catalog
-//!
-//! Every event emittable by the contract is represented by a method on this
-//! struct. The catalog is exhaustive by design: if an event is not here it
-//! is not part of the official surface.
-//!
-//! | Method | Event name | Topic[2] |
-//! |---|---|---|
-//! | `sla_calc` | `sla_calc` | severity |
-//! | `settlement_intent` | `set_int` | severity |
-//! | `duplicate_input` | `dup_input` | severity |
-//! | `config_updated` | `cfg_upd` | severity |
-//! | `severity_added` | `sev_add` | severity |
-//! | `severity_updated` | `sev_upd` | severity |
-//! | `severity_removed` | `cfg_rem` | severity |
-//! | `paused` | `paused` | caller |
-//! | `unpaused` | `unpause` | caller |
-//! | `config_frozen` | `cfg_frz` | caller |
-//! | `config_unfrozen` | `cfg_unfrz` | caller |
-//! | `pruned` | `pruned` | caller |
-//! | `pruned_by_age` | `pruned_a` | caller |
+//! These helpers use the canonical per-event versions. Existing contract
+//! entrypoints also publish directly; this module's declaration does not reroute
+//! those entrypoints or change their payloads. `event_schema.rs` remains the
+//! authoritative event catalog.
 
 use soroban_sdk::{Address, Env, Symbol};
 

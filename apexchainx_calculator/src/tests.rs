@@ -156,7 +156,8 @@ fn test_result_schema_is_explicit_and_stable() {
 
     let schema = client.get_result_schema();
     assert_eq!(schema.version, symbol_short!("v2"));
-    assert_eq!(schema.schema_version, 1);
+    assert_eq!(schema.schema_version, 2);
+    assert_eq!(schema.schema_version, RESULT_SCHEMA_VERSION);
     assert_eq!(schema.status_met, symbol_short!("met"));
     assert_eq!(schema.status_violated, symbol_short!("viol"));
     assert_eq!(schema.payment_reward, symbol_short!("rew"));
@@ -2639,44 +2640,52 @@ fn test_set_operator_locks_out_old_operator() {
 // #589/#590 – Governance proposal expiry and renounce invalidation
 // ============================================================
 
-/// A lapsed operator proposal is first observed by an accept attempt: the
-/// attempt fails with expiry, exactly one `op_xp` event is emitted, and the
-/// pending keys are cleared. A later attempt observes no pending proposal and
-/// emits nothing (idempotent expiry). (#589)
+/// Rejected accepts preserve the proposal and role, and only produce failed-call
+/// diagnostics. Cancellation is the explicit successful cleanup operation.
 #[test]
-fn test_operator_proposal_expiry_emits_event_once_and_clears_keys() {
+fn test_operator_proposal_expiry_rolls_back_effects_on_error() {
     let (env, client, actors) = setup();
     let new_op = soroban_sdk::Address::generate(&env);
-
-    env.ledger().set_timestamp(1_000_000);
+    let proposed_at = 1_000_000;
+    env.ledger().set_timestamp(proposed_at);
     client.propose_operator(&actors.admin, &new_op);
-    assert_eq!(client.get_pending_operator(), Some(new_op.clone()));
+    let committed_before = committed_contract_event_count(&env);
+    env.ledger()
+        .set_timestamp(proposed_at + crate::governance::PROPOSAL_EXPIRY_WINDOW + 1);
 
-    env.ledger().set_timestamp(1_000_000 + 90 * 24 * 60 * 60 + 1);
-
-    // First attempt observes the expiry: reject, emit op_xp once, clear keys.
-    assert!(client.try_accept_operator(&new_op).is_err());
+    for attempt in 1..=2 {
+        assert_eq!(
+            client.try_accept_operator(&new_op),
+            Err(Ok(SLAError::ProposalExpired))
+        );
+        assert_eq!(client.get_pending_operator(), Some(new_op.clone()));
+        assert_eq!(client.get_operator(), actors.operator);
+        env.as_contract(&client.address, || {
+            assert_eq!(
+                env.storage().instance().get::<_, u64>(&PENDING_OP_TS_KEY),
+                Some(proposed_at)
+            );
+        });
+        assert_eq!(committed_contract_event_count(&env), committed_before);
+        let failed = env
+            .to_snapshot()
+            .events
+            .0
+            .into_iter()
+            .filter(|e| e.failed_call && e.event.type_ == soroban_sdk::xdr::ContractEventType::Contract)
+            .count();
+        assert_eq!(failed, attempt, "each rejected accept emits only a diagnostic");
+    }
+    client.cancel_operator_proposal(&actors.admin);
     assert_eq!(client.get_pending_operator(), None);
-
-    let count_xp = |env: &Env| -> u32 {
-        let mut n = 0u32;
-        let events = env.events().all();
-        for i in 0..events.len() {
-            let (_, topics, _) = events.get(i).unwrap();
-            if !topics.is_empty() {
-                let name: Symbol = topics.get(0).unwrap().try_into_val(env).unwrap();
-                if name == EVENT_OP_XP {
-                    n += 1;
-                }
-            }
-        }
-        n
-    };
-    assert_eq!(count_xp(&env), 1, "expiry must emit exactly one op_xp event");
-
-    // Second attempt: keys are already cleared → NoPendingTransfer, no re-emit.
-    assert!(client.try_accept_operator(&new_op).is_err());
-    assert_eq!(count_xp(&env), 1, "expiry must be idempotent — no second op_xp");
+    env.as_contract(&client.address, || {
+        assert!(!env.storage().instance().has(&PENDING_OP_TS_KEY));
+    });
+    assert_eq!(
+        client.try_accept_operator(&new_op),
+        Err(Ok(SLAError::NoPendingTransfer))
+    );
+    assert_eq!(client.get_operator(), actors.operator);
 }
 
 /// Mirror of the operator expiry test for the admin handoff (`adm_xp`). (#589)

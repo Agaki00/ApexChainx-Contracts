@@ -1,12 +1,8 @@
-//! Unified internal history trim helper (Issue #655).
+//! Shared history trim helper (Issue #655).
 //!
-//! Pruning logic previously existed in three places with subtly different
-//! guarantees: `calculate_sla` (one-at-a-time append trim), `prune_history`
-//! (admin trim-to-limit), and `prune_history_by_age` (age-based removal).
-//!
-//! This module provides `trim_history` — a single internal function that all
-//! three call sites route through, ensuring consistent event emission,
-//! HISTORY_LEN_KEY maintenance, and removal semantics.
+//! Available to callers that already computed the retained entries and removal
+//! count. It rebuilds canonical history and emits a versioned trim event.
+//! Declaring this module does not reroute existing contract pruning entrypoints.
 
 use crate::{SLAResult, EVENT_PRUNED, EVENT_PRUNED_AGE};
 use soroban_sdk::{Address, Env, Vec};

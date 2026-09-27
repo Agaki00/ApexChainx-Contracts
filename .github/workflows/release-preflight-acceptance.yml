@@ -31,9 +31,9 @@ jobs:
         run: |
           npm test 2>&1 | tee validation-results/typescript-all.log
           npm run typecheck 2>&1 | tee validation-results/typecheck.log
-      - name: Generate and verify Rust fixtures
+      - name: Full Rust regressions and generated fixture freshness
         run: |
-          cargo test --locked --lib ts_parity_fixtures 2>&1 | tee validation-results/fixtures.log
+          cargo test --locked --lib 2>&1 | tee validation-results/rust-full.log
           git diff --exit-code -- ts/fixtures ts/generated
           test -z "$(git ls-files --others --exclude-standard -- ts/fixtures ts/generated)"
       - name: Budgets and persistence freshness

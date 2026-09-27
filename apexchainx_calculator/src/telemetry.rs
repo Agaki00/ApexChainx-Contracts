@@ -1,9 +1,8 @@
-//! Grouped severity telemetry storage (Issue #654).
+//! Grouped telemetry helpers (Issue #654).
 //!
-//! Previously `record_severity_telemetry` performed four separate instance-storage
-//! reads per `calculate_sla` call (calc counts, violation counts, last-calc ts,
-//! last-violation ts). This module groups all four into one `SeverityTelemetryRecord`
-//! so a single read/write pair replaces the four-read pattern on the hot path.
+//! These helpers store a separate grouped record. Existing contract entrypoints
+//! still use the canonical packed telemetry keys; compiling this module does not
+//! migrate their storage or switch the calculation hot path.
 
 use soroban_sdk::{contracttype, symbol_short, Env, Map, Symbol};
 
@@ -11,8 +10,7 @@ use soroban_sdk::{contracttype, symbol_short, Env, Map, Symbol};
 pub(crate) const TELEMETRY_KEY: Symbol = symbol_short!("TELMET");
 
 /// All per-severity telemetry counters grouped into one storage value.
-/// Replaces the four separate keys (SEVERITY_CALC_COUNTS_KEY,
-/// SEVERITY_VIOL_COUNTS_KEY, LAST_CALCULATION_TS_KEY, LAST_VIOLATION_TS_KEY).
+/// This is separate from the currently deployed packed telemetry representation.
 #[contracttype]
 #[derive(Clone)]
 pub struct SeverityTelemetryRecord {

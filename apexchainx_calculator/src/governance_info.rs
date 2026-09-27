@@ -10,7 +10,7 @@ use soroban_sdk::{contracttype, Env};
 /// The proposal expiry window in seconds (90 days).
 /// Matches `PROPOSAL_EXPIRY_WINDOW` in `governance.rs`.
 /// Exposed here so backends can query it without hardcoding the value.
-pub const PROPOSAL_EXPIRY_WINDOW_SECS: u64 = 90 * 24 * 60 * 60;
+pub const PROPOSAL_EXPIRY_WINDOW_SECS: u64 = crate::governance::PROPOSAL_EXPIRY_WINDOW;
 
 /// Governance posture snapshot returned by `get_governance_info`.
 #[contracttype]
@@ -26,14 +26,8 @@ pub struct GovernanceInfo {
 
 /// Build a `GovernanceInfo` snapshot from current on-chain state.
 pub fn get_governance_info(env: &Env) -> GovernanceInfo {
-    let has_pending_admin = env
-        .storage()
-        .instance()
-        .has(&crate::PENDING_ADMIN_KEY);
-    let has_pending_operator = env
-        .storage()
-        .instance()
-        .has(&crate::PENDING_OP_KEY);
+    let has_pending_admin = env.storage().instance().has(&crate::PENDING_ADMIN_KEY);
+    let has_pending_operator = env.storage().instance().has(&crate::PENDING_OP_KEY);
     GovernanceInfo {
         proposal_expiry_window_secs: PROPOSAL_EXPIRY_WINDOW_SECS,
         has_pending_admin,

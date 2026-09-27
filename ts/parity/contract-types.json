@@ -30,7 +30,6 @@
   "lib.rs:ContractStateFingerprint": "pubcontract_name:Symbol,pubstorage_version:u32,pubresult_schema_version:u32,pubconfig_version_hash:u64,pubis_paused:bool,pubneeds_migration:bool,pubis_config_frozen:bool,pubcaptured_at:u64,",
   "lib.rs:VersionInfo": "pubstorage_version:u32,pubresult_schema_version:u32,pubneeds_migration:bool,pubis_paused:bool,pubcontract_name:Symbol,",
   "metrics/retention_stats.rs:HistoryRetentionMetrics": "pubprotocol_version:u32,pubretention_limit:u32,pubretained_entries:u32,pubpruned_entries:u32,pubtotal_entries:u32,pubretention_ratio_bps:u32,",
-  "rent_estimate.rs:RentEstimate": "pubvalue:u64,pubis_approximation:bool,pubformula:soroban_sdk::String,",
   "telemetry.rs:SeverityTelemetryRecord": "pubcalc_counts:Map<Symbol,u32>,pubviol_counts:Map<Symbol,u32>,publast_calc_ts:Map<Symbol,u64>,publast_viol_ts:Map<Symbol,u64>,",
   "version_negotiation.rs:VersionNegotiationInfo": "pubcontract_name:Symbol,pubprotocol_version:u32,pubstorage_version:u32,pubmin_compatible_protocol:u32,pubis_paused:bool,pubneeds_migration:bool,pubresult_schema_version:u32,pubevent_version:Symbol,",
   "version_negotiation.rs:NegotiationOutcome": "Compatible,Negotiated,Incompatible,",

@@ -18,7 +18,8 @@
 //!
 //! Proposals expire after `PROPOSAL_EXPIRY_WINDOW` seconds if not accepted.
 //! The expiry is lazy and observable: the first accept attempt after expiry
-//! emits a typed expiry event and clears the pending keys.
+//! returns ProposalExpired; its diagnostic event and attempted key removal are
+//! rolled back. Cancellation or replacement clears the pending keys.
 //!
 //! ## Role transitions
 //!

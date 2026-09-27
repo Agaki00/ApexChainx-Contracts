@@ -29,6 +29,21 @@ mod tests;
 #[cfg(test)]
 mod fuzz_tests;
 
+pub mod calculation_helpers;
+pub mod config_snapshot_cache;
+pub mod event_publisher;
+pub mod fuzz_feasibility;
+pub mod governance_doc;
+pub mod governance_info;
+#[cfg(test)]
+mod history_invariant_tests;
+pub mod outage_id;
+pub mod prune_core;
+pub mod rent_estimate;
+pub mod sementics;
+pub mod severity_constants;
+pub mod telemetry;
+
 pub mod api_stability;
 pub mod audit_state;
 /// #422 – formerly-orphan test-only modules, now declared so their guarantees

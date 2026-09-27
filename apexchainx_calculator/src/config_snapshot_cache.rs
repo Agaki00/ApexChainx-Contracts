@@ -1,24 +1,8 @@
-//! Memoized config snapshot cache keyed by config version hash (Issue #660).
+//! Optional hash-keyed snapshot cache helpers (Issue #660).
 //!
-//! `get_config_snapshot` previously rebuilt and re-sorted the full config map
-//! on every call. Since backends are advised to "bootstrap once, diff by hash",
-//! this causes redundant CPU and storage work on every poll when the config
-//! hasn't changed.
-//!
-//! # Design
-//!
-//! - The snapshot is cached under `SNAPSHOT_CACHE_KEY` alongside its hash.
-//! - On read: if the stored hash matches the current `config_version_hash`,
-//!   return the cached snapshot directly.
-//! - On write: `invalidate_snapshot_cache()` removes the cached entry so the
-//!   next read recomputes and re-caches a fresh snapshot.
-//!
-//! # Invariants
-//!
-//! - The cached snapshot is always consistent with the hash stored beside it.
-//! - Any config write MUST call `invalidate_snapshot_cache()` before returning.
-//! - The cache is a pure performance optimisation; removing it changes only
-//!   the cost curve, not correctness.
+//! A caller must invalidate on every configuration write before using this
+//! cache. Existing contract entrypoints do not use it; compiling this module
+//! does not add writes to read-only contract methods.
 
 use soroban_sdk::{contracttype, symbol_short, Env, Symbol};
 
@@ -39,10 +23,7 @@ pub struct SnapshotCacheEntry {
 /// Return the cached snapshot if the config hash is unchanged,
 /// otherwise `None` (caller must recompute and call `store_snapshot_cache`).
 pub fn read_snapshot_cache(env: &Env, current_hash: u64) -> Option<SLAConfigSnapshot> {
-    let entry: SnapshotCacheEntry = env
-        .storage()
-        .instance()
-        .get(&SNAPSHOT_CACHE_KEY)?;
+    let entry: SnapshotCacheEntry = env.storage().instance().get(&SNAPSHOT_CACHE_KEY)?;
     if entry.config_version_hash == current_hash {
         Some(entry.snapshot)
     } else {

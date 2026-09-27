@@ -55,8 +55,8 @@ pub const FEASIBILITY_SCENARIOS: &[FeasibilityScenario] = &[
         threshold_minutes: 60,
         penalty_per_minute: 0,
         reward_base: 500,
-        should_accept: true,
-        description: "low: zero penalty (exempt), any reward accepted",
+        should_accept: false,
+        description: "low: zero penalty violates the shared positive-penalty bound",
     },
     FeasibilityScenario {
         severity: "medium",
@@ -67,3 +67,20 @@ pub const FEASIBILITY_SCENARIOS: &[FeasibilityScenario] = &[
         description: "medium: boundary-adjacent values within feasibility region",
     },
 ];
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn feasibility_scenarios_match_the_contract_validator() {
+        let env = soroban_sdk::Env::default();
+        for case in super::FEASIBILITY_SCENARIOS {
+            let actual = crate::SLACalculatorContract::validate_config(
+                &soroban_sdk::Symbol::new(&env, case.severity),
+                case.threshold_minutes,
+                case.penalty_per_minute,
+                case.reward_base,
+            );
+            assert_eq!(actual.is_ok(), case.should_accept, "{}", case.description);
+        }
+    }
+}

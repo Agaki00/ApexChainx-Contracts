@@ -1,39 +1,26 @@
-//! Extracted sub-step helpers for `calculate_sla` (Issue #653).
+//! Reusable calculation helpers (Issue #653).
 //!
-//! `calculate_sla` previously mixed policy, history scan, dedup decision,
-//! retention trim, stats, and event publication inline in one method body.
-//! This module extracts the coherent sub-steps as documented helpers, keeping
-//! `calculate_sla` as thin orchestration and making each phase independently
-//! readable and testable.
-//!
-//! # Phases
-//!
-//! | Helper | Phase | Description |
-//! |---|---|---|
-//! | [`check_duplicate_policy`] | Dedup | Scans history for the outage, returns the stored entry and per-outage count |
-//! | [`apply_retention_trim`] | Trim | Enforces the retention cap, drops the oldest entry when exceeded |
-//! | [`DuplicateDecision`] | Types | Result type from the dedup scan |
+//! The duplicate scan reads the canonical legacy/sharded history adapter.
+//! These helpers are compiled and available to Rust consumers; the contract's
+//! existing entrypoint orchestration is unchanged by their module declaration.
 
 use soroban_sdk::{Env, Symbol, Vec};
 
-use crate::{SLAResult, MAX_RECALCS_PER_OUTAGE, HISTORY_KEY, RETENTION_LIMIT_KEY, MAX_HISTORY_SIZE};
+use crate::{SLAResult, MAX_HISTORY_SIZE, MAX_RECALCS_PER_OUTAGE, RETENTION_LIMIT_KEY};
 
 /// Result of the duplicate/anti-spam scan performed at the start of `calculate_sla`.
+// One bounded result stays on the stack; boxing would add allocation to this path.
+#[allow(clippy::large_enum_variant)]
 pub enum DuplicateDecision {
     /// No prior entry for this outage — proceed with fresh calculation.
     New,
     /// Entry exists with the same config hash.
     /// The caller must check whether inputs match (idempotent replay)
     /// or differ (conflict → `DuplicateOutageInput`).
-    ExistingUnderSameConfig {
-        prev: SLAResult,
-        stored_count: u32,
-    },
+    ExistingUnderSameConfig { prev: SLAResult, stored_count: u32 },
     /// Entry exists but under a different config hash — treat as fresh.
     /// The caller must still check the anti-spam cap.
-    ExistingUnderDifferentConfig {
-        stored_count: u32,
-    },
+    ExistingUnderDifferentConfig { stored_count: u32 },
 }
 
 /// Scan history for `outage_id` and return the dedup decision.
@@ -41,16 +28,8 @@ pub enum DuplicateDecision {
 /// Counts how many retained entries the outage already owns (anti-spam)
 /// and returns the most recent one for hash/input comparison. This is the
 /// entire history-scan cost of `calculate_sla` extracted into one place.
-pub fn check_duplicate_policy(
-    env: &Env,
-    outage_id: &Symbol,
-    config_version_hash: u64,
-) -> DuplicateDecision {
-    let history: Vec<SLAResult> = env
-        .storage()
-        .instance()
-        .get(&HISTORY_KEY)
-        .unwrap_or_else(|| Vec::new(env));
+pub fn check_duplicate_policy(env: &Env, outage_id: &Symbol, config_version_hash: u64) -> DuplicateDecision {
+    let history = crate::history::entries_for_outage(env, outage_id);
 
     let mut latest: Option<SLAResult> = None;
     let mut stored_count: u32 = 0;
@@ -67,10 +46,7 @@ pub fn check_duplicate_policy(
 
     match latest {
         None => DuplicateDecision::New,
-        Some(prev) if same_config => DuplicateDecision::ExistingUnderSameConfig {
-            prev,
-            stored_count,
-        },
+        Some(prev) if same_config => DuplicateDecision::ExistingUnderSameConfig { prev, stored_count },
         Some(_) => DuplicateDecision::ExistingUnderDifferentConfig { stored_count },
     }
 }
@@ -79,7 +55,7 @@ pub fn check_duplicate_policy(
 ///
 /// Extracted from the inline retention-trim block in `calculate_sla`. Does
 /// not write to storage — the caller must persist the returned vector.
-pub fn apply_retention_trim(env: &Env, mut history: Vec<SLAResult>) -> Vec<SLAResult> {
+pub fn apply_retention_trim(env: &Env, history: Vec<SLAResult>) -> Vec<SLAResult> {
     let retention_limit: u32 = env
         .storage()
         .instance()
