@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { EventDispatcher, correlationId } from "../eventDispatch";
 import { EVENT_VERSION, EVENT_VERSIONS } from "../generated/contractConstants";
-import { withoutComments } from "../../scripts/check-parity-coverage";
+import { discoverSources, withoutComments } from "../../scripts/check-parity-coverage";
 
 test("per-name dispatch isolates versions and supports explicit historical decoders", () => {
   const dispatcher = new EventDispatcher<string>();
@@ -48,12 +48,15 @@ test("correlation IDs preserve the ledger and reproduce the Rust golden vector",
 
 test("event emitters resolve topic versions by their own event name", () => {
   let emitters = 0;
-  for (const file of readdirSync("apexchainx_calculator/src").filter(name => name.endsWith(".rs"))) {
-    const source = withoutComments(readFileSync(`apexchainx_calculator/src/${file}`, "utf8"));
+  for (const [file, contents] of Object.entries(discoverSources("apexchainx_calculator/src"))) {
+    const source = withoutComments(contents);
+    let audited = 0;
     for (const match of source.matchAll(/\.publish\(\s*\(\s*((?:(?:crate|event_schema)::)?EVENT_\w+|event_name|expiry_event)(?:\.clone\(\))?,\s*([^,]+),/g)) {
       emitters++;
+      audited++;
       assert.equal(match[2].replace(/\s+/g, ""), `${match[2].includes("crate::") ? "crate::" : ""}event_schema::event_version(${match[1]})`, file);
     }
+    assert.equal(audited, [...source.matchAll(/\.publish\(/g)].length, `${file}: every publish site must be audited`);
   }
-  assert.ok(emitters >= 50, "emit-site audit unexpectedly missed the event surface");
+  assert.ok(emitters > 0, "emit-site audit unexpectedly missed the event surface");
 });

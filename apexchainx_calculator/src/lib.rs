@@ -257,8 +257,9 @@ pub(crate) const STORAGE_VERSION_KEY: Symbol = symbol_short!("VER");
 // This must stay in lockstep with migrate(): a deployed v2 contract has
 // history/configs in the pre-v3 shapes but not the sharded history keys or
 // the cached config count.
-// v4 coordinates the per-name event ABI and ledger-bound correlation encoding.
-pub(crate) const STORAGE_VERSION: u32 = 4;
+// v4 adds config-update actor attribution (#671).
+// v5 coordinates the per-name event ABI and ledger-bound correlation encoding.
+pub(crate) const STORAGE_VERSION: u32 = 5;
 
 /// Version of the SLAResult schema exposed via get_result_schema().
 /// Incremented when result encoding changes in a breaking way.
@@ -361,6 +362,11 @@ pub(crate) const TOTAL_ENTRIES_KEY: Symbol = symbol_short!("TTOTENT");
 /// On-chain key storing the ledger sequence of the last config update. Re-exported
 /// here so the storage-key namespace regression test catches any future collisions.
 pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
+
+/// On-chain key storing the admin address that performed the last config update
+/// (#671). Re-exported here so the storage-key namespace regression test catches
+/// any future collisions.
+pub use crate::config_metadata::LCFG_UPD_ACTOR_KEY;
 
 // -----------------------------------------------------------------------
 // Event Constants
@@ -1134,6 +1140,12 @@ pub struct PauseInfo {
 pub struct ConfigUpdateInfo {
     /// Ledger sequence at which the most recent `set_config` succeeded.
     pub sequence: u32,
+    /// Admin address that performed the most recent `set_config` (#671).
+    /// `None` when the recorded update predates the v4 storage schema —
+    /// meaning "attribution was not yet recorded", never "no actor exists".
+    /// Additive field; older consumers that decode only `sequence` are
+    /// unaffected.
+    pub actor: Option<Address>,
 }
 
 /// SC-021 – Storage version and migration posture for off-chain consumers.
@@ -1633,11 +1645,18 @@ impl SLACalculatorContract {
             current = 3;
         }
 
-        // v4 is the coordinated event-ABI release (#497/#675). Storage bytes
-        // are unchanged; the explicit stamp requires an admin upgrade acknowledgement.
+        // v3 -> v4 preserves legacy sequence metadata without inventing actor
+        // attribution (#671). The next successful configuration update records it.
         if current == 3 {
             env.storage().instance().set(&STORAGE_VERSION_KEY, &4u32);
             current = 4;
+        }
+
+        // v4 -> v5 coordinates event ABI generation 2 (#497/#675).
+        // Preserve history and actor attribution; only the version stamp changes.
+        if current == 4 {
+            env.storage().instance().set(&STORAGE_VERSION_KEY, &5u32);
+            current = 5;
         }
 
         // Sanity: after all steps we must be at STORAGE_VERSION
@@ -1941,11 +1960,12 @@ impl SLACalculatorContract {
         // so get_config_count stays an O(1) read.
         env.storage().instance().set(&CONFIG_COUNT_KEY, &configs.len());
 
-        // Issue #4 – stamp the ledger sequence of the most recent config
-        // update so backends can detect when their cached configuration is
-        // stale. Called after the storage write so the recorded sequence
-        // always reflects a successful update.
-        config_metadata::record_config_update(&env);
+        // Issue #4/#671 – stamp the ledger sequence of the most recent config
+        // update together with the admin that performed it, so backends can
+        // both detect stale cached configuration and attribute the change.
+        // Called after the storage write so the recorded metadata always
+        // reflects a successful update.
+        config_metadata::record_config_update(&env, &caller);
 
         // #408 – record the config snapshot under its new version hash so
         // historical configs remain recoverable for deterministic replay.
@@ -2019,7 +2039,9 @@ impl SLACalculatorContract {
         );
         env.storage().instance().set(&CUSTOM_CONFIG_KEY, &custom);
 
-        config_metadata::record_config_update(&env);
+        // #671 – attribute custom-severity config updates to the acting admin
+        // as well, so "who tuned severity X" covers custom lanes too.
+        config_metadata::record_config_update(&env, &caller);
         // #408 – record the config snapshot under its new version hash.
         Self::record_config_registry(&env)?;
 
@@ -2131,7 +2153,8 @@ impl SLACalculatorContract {
     /// Soroban contract client boundary.
     pub fn get_last_config_update(env: Env) -> Result<Option<ConfigUpdateInfo>, SLAError> {
         Self::check_version(&env)?;
-        Ok(config_metadata::get_last_config_update(&env).map(|seq| ConfigUpdateInfo { sequence: seq }))
+        Ok(config_metadata::get_last_config_update(&env)
+            .map(|(sequence, actor)| ConfigUpdateInfo { sequence, actor }))
     }
 
     /// Returns a deterministic backend-friendly snapshot of all config values.
@@ -3926,11 +3949,12 @@ impl SLACalculatorContract {
     // SC-079: Read-only history / retention helpers
     // -------------------------------------------------------------------
 
-    /// Returns the number of severity tiers currently configured.
-    /// Off-chain consumers can inspect retention state without fetching the full map.
+    /// Returns the number of configured severity tiers.
+    /// Off-chain consumers can inspect config state without fetching the full map.
     /// This is an O(1) read: the count is cached alongside CONFIG_KEY (#606).
     pub fn get_config_count(env: Env) -> Result<u32, SLAError> {
-        history::get_config_count(&env)
+        Self::check_version(&env)?;
+        Ok(env.storage().instance().get(&CONFIG_COUNT_KEY).unwrap_or(0))
     }
 
     /// Returns the current storage schema version so off-chain consumers can

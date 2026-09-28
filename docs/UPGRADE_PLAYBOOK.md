@@ -147,13 +147,16 @@ pub fn migrate(env: Env, caller: Address) -> Result<(), SLAError>
 6. After all steps, verifies `current == STORAGE_VERSION`
 7. Emits a `migrate_done` event with `(old_version, new_version)`
 
-**Current migration path (as of v2):**
+**Current migration path (as of v4):**
 
 | Step | From | To | Action |
 |------|------|----|--------|
 | v0→v1 | `0` | `1` | Calls `init_missing_storage_defaults()` to populate any missing keys (PAUSED, STATS, history, config, custom config) and stamps `STORAGE_VERSION = 1` |
+| v1→v2 | `1` | `2` | Backfills `HISTORY_LEN` from the stored history vector (#463) |
+| v2→v3 | `2` | `3` | Converts the legacy `HIST` vector to the sharded layout (`HISTE`/`HISTI`/`HISTH`/`HISTT`, #580/#581/#582) and backfills `CFGCNT` (#606) |
+| v3→v4 | `3` | `4` | Adds `LCFGUPDA` (config-update actor attribution, #671). No data backfill: pre-v4 update sequences report `actor: None` until the next config change |
 
-Future upgrades will add new arms (e.g., `v1→v2`) as commented placeholders
+Future upgrades will add new arms (e.g., `v4→v5`) as commented placeholders
 in `lib.rs`.
 
 ### 4.2 Expected Errors

@@ -4,7 +4,7 @@
 //! SLA configurations. It enforces validation, cross-severity ordering,
 //! and freeze-state gating for all config mutations.
 
-use soroban_sdk::{Env, Map, Symbol, Vec};
+use soroban_sdk::{Address, Env, Map, Symbol, Vec};
 
 use crate::{
     config_freeze, config_metadata, SLAConfig, SLAConfigEntry, SLAConfigSnapshot, SLAError, CONFIG_KEY,
@@ -18,6 +18,7 @@ use crate::{
 /// the config update timestamp, and emits a `cfg_upd` event.
 pub fn set_config(
     env: &Env,
+    caller: &Address,
     severity: Symbol,
     threshold_minutes: u32,
     penalty_per_minute: i128,
@@ -56,7 +57,7 @@ pub fn set_config(
     );
     env.storage().instance().set(&CONFIG_KEY, &configs);
 
-    config_metadata::record_config_update(env);
+    config_metadata::record_config_update(env, caller);
 
     env.events().publish(
         (
@@ -145,7 +146,8 @@ pub fn get_config_version_hash(env: &Env) -> Result<u64, SLAError> {
 /// Returns metadata about the most recent configuration update, if any.
 pub fn get_last_config_update(env: &Env) -> Result<Option<crate::ConfigUpdateInfo>, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
-    Ok(config_metadata::get_last_config_update(env).map(|seq| crate::ConfigUpdateInfo { sequence: seq }))
+    Ok(config_metadata::get_last_config_update(env)
+        .map(|(sequence, actor)| crate::ConfigUpdateInfo { sequence, actor }))
 }
 
 /// Registers or updates a custom (non-canonical) severity level.
