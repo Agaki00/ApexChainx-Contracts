@@ -19,11 +19,11 @@ apexchainx_calculator/test_snapshots/tests/*.json.tmp
 *.wasm
 
 # IDE
-.vscode/
 .idea/
 *.swp
 *.swo
 
+temp_auto_push.bat
 # OS
 .DS_Store
 Thumbs.db
@@ -39,8 +39,6 @@ Thumbs.db
 node_modules/
 
 # Environment secrets
-.env
-.env.*
 !.env.example
 
 
@@ -49,3 +47,6 @@ node_modules/
 *.wasm
 # Local validation evidence
 validation-results/
+.gitignore
+branch_structure.json
+config.bat
