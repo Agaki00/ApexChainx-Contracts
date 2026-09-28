@@ -287,7 +287,7 @@ canonical configuration.
 | Parameter bounds | General + per-severity + cross-parameter + cross-severity | General bounds only (`validate_general_bounds`) |
 | Per-severity limits | `critical` max 60 min, `low` penalty cap 100, etc. | None — only the universal ranges apply |
 | Cross-severity ordering | Enforces penalty progression (critical ≥ high ≥ medium) | Not enforced |
-| Metadata recording | Config version hash, `get_last_config_update` updated | Not tracked in canonical version hash or metadata |
+| Metadata recording | Config version hash, `get_last_config_update` (sequence + actor) updated | `get_last_config_update` (sequence + actor) updated; **not** tracked in the canonical version hash or snapshot |
 
 ### General Bounds Applied
 
@@ -313,8 +313,12 @@ canonical configuration.
 
 - Custom severity entries are stored in a separate `CUSTOM_CONFIG_KEY` map,
   independent of the canonical `CONFIG_KEY` map.
-- They do **not** appear in `get_config_snapshot`, `get_config_version_hash`, or
-  `get_last_config_update` — those APIs reflect canonical severities only.
+- They do **not** appear in `get_config_snapshot` or `get_config_version_hash`
+  — those APIs reflect canonical severities only.
+- Since storage v4 (#671), a `set_custom_severity` call **does** refresh
+  `get_last_config_update` (returning `{ sequence, actor }` for the acting
+  admin), so a forensics query can attribute custom-tier tuning too; it just
+  does not move the canonical config version hash.
 - To inspect registered custom severities, use `get_custom_config_snapshot`.
 - Removing a severity with `remove_custom_severity` clears its entry from the
   map and emits a `cfg_upd` event with zeroed payload.

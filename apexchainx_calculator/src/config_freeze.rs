@@ -239,7 +239,12 @@ mod tests {
         let (_env, client, admin, operator) = setup();
         client.freeze_config(&admin);
         // calculate_sla is only guarded by require_not_paused, not require_not_frozen.
-        let result = client.calculate_sla(&operator, &soroban_sdk::symbol_short!("INC001"), &30u32);
+        let result = client.calculate_sla(
+            &operator,
+            &soroban_sdk::symbol_short!("INC001"),
+            &soroban_sdk::symbol_short!("critical"),
+            &30u32,
+        );
         assert_eq!(result.mttr_minutes, 30, "freeze must not block calculate_sla");
     }
 }

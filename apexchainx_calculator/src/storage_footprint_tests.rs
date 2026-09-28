@@ -51,10 +51,11 @@ fn deploy() -> (Env, SLACalculatorContractClient<'static>, soroban_sdk::Address)
 ///
 /// Note: only the keys written eagerly by `initialize` are expected here.
 /// `PADMIN`/`POP` (pending transfers), `PAUSEINF` (pause metadata), `RETLIM`
-/// (retention override), and `LCFGUPD` (config-update stamp) are created
-/// lazily on first use and must NOT exist after a fresh initialize. `CUSTCFG`
-/// (custom severities) is seeded eagerly since #455, so it IS expected here.
-/// `CFGCNT` (cached config count) is seeded eagerly since #606.
+/// (retention override), `LCFGUPD` (config-update stamp), and `LCFGUPDA`
+/// (config-update actor, #671) are created lazily on first use and must NOT
+/// exist after a fresh initialize. `CUSTCFG` (custom severities) is seeded
+/// eagerly since #455, so it IS expected here. `CFGCNT` (cached config count)
+/// is seeded eagerly since #606.
 #[test]
 fn storage_key_count_is_stable_after_init() {
     let (env, client, _op) = deploy();
@@ -76,8 +77,8 @@ fn storage_key_count_is_stable_after_init() {
     // per-entry and per-outage-index sub-key prefixes, created on first
     // evaluation; the legacy `HIST` key is never written by fresh deploys
     // (#580/#581/#582).
-    let lazily_created: [&str; 8] = [
-        "PADMIN", "POP", "PAUSEINF", "RETLIM", "LCFGUPD", "HIST", "HISTE", "HISTI",
+    let lazily_created: [&str; 9] = [
+        "PADMIN", "POP", "PAUSEINF", "RETLIM", "LCFGUPD", "LCFGUPDA", "HIST", "HISTE", "HISTI",
     ];
 
     env.as_contract(&client.address, || {

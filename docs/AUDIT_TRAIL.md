@@ -370,6 +370,15 @@ tracking `sev_add` (add) and `cfg_rem` (remove) events.
   invalidate the entry on every `cfg_upd`, then re-read
   `get_config_snapshot()`. The on-chain `LAST_CFG_UPDATE_KEY`
   exposed via `get_last_config_update()` is a cheap staleness check.
+- **Actor attribution** — since storage v4 (#671), config-update metadata
+  records the admin that performed the change: `get_last_config_update()`
+  returns `{ sequence, actor }` with `actor = Some(admin)`. The actor is
+  snapshotted in the same storage generation as the sequence, so the pair is
+  always self-consistent — no event correlation is needed to answer "who
+  tuned severity X right before the outage". Updates recorded before v4
+  report `actor: None` ("recorded before attribution existed"), and the
+  attribution is overwritten by the next config change. Custom-severity
+  changes (`set_custom_severity`) are attributed by the same mechanism.
 - **Validation gating** — `cfg_upd` is only emitted if `set_config`
   validation passes; failed updates emit no event. Backends should
   not assume "no `cfg_upd` for one block ⇒ unchanged" — the admin

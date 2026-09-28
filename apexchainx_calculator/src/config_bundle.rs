@@ -51,7 +51,7 @@ use crate::{SLAConfigSnapshot, SLAResultSchema};
 /// Written on every `get_config_bundle` call that recomposes the bundle
 /// (i.e. when the current config hash differs from the cached hash).
 /// Removed by `invalidate_config_bundle_cache` on any config write.
-pub(crate) const BUNDLE_CACHE_KEY: Symbol = symbol_short!(\"BNDLCCH\");
+pub(crate) const BUNDLE_CACHE_KEY: Symbol = symbol_short!("BNDLCCH");
 
 /// Combined configuration and schema bundle for backend consumption.
 ///
@@ -101,8 +101,8 @@ pub fn read_config_bundle(env: &Env, current_hash: u64) -> Option<ConfigBundle> 
     }
 
     // Recompose the bundle with the current snapshot and schema.
-    let snapshot = crate::SLACalculatorContract::build_config_snapshot(env)?;
-    let schema = crate::SLACalculatorContract::build_result_schema(env);
+    let snapshot = crate::SLACalculatorContract::build_config_snapshot(env).ok()?;
+    let schema = crate::SLACalculatorContract::get_result_schema(env.clone()).ok()?;
     let bundle = ConfigBundle {
         snapshot,
         schema,

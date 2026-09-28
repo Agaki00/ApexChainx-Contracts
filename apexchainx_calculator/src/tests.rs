@@ -538,6 +538,7 @@ fn test_storage_key_namespace_symbols_are_distinct() {
     //   TOTAL_PRUNED_KEY           = "TPRUNED"
     //   TOTAL_ENTRIES_KEY          = "TTOTENT"
     //   LAST_CFG_UPDATE_KEY        = "LCFGUPD"  (re-exported from config_metadata)
+    //   LCFG_UPD_ACTOR_KEY         = "LCFGUPDA" (re-exported from config_metadata, #671)
     // -----------------------------------------------------------------------
     let keys = [
         ADMIN_KEY,
@@ -568,6 +569,7 @@ fn test_storage_key_namespace_symbols_are_distinct() {
         TOTAL_PRUNED_KEY,
         TOTAL_ENTRIES_KEY,
         LAST_CFG_UPDATE_KEY,
+        LCFG_UPD_ACTOR_KEY,
     ];
 
     for i in 0..keys.len() {
@@ -2628,10 +2630,13 @@ fn test_set_operator_locks_out_old_operator() {
 // #589/#590 – Governance proposal expiry and renounce invalidation
 // ============================================================
 
-/// A lapsed operator proposal is first observed by an accept attempt: the
-/// attempt fails with expiry, exactly one `op_xp` event is emitted, and the
-/// pending keys are cleared. A later attempt observes no pending proposal and
-/// emits nothing (idempotent expiry). (#589)
+/// A lapsed operator proposal is observed by an accept attempt: the attempt
+/// fails with expiry and emits an `op_xp` event carrying the stale candidate.
+///
+/// Because a contract function that returns `Err` rolls back its storage
+/// writes, the pending keys cannot be cleared by the failing attempt — the
+/// reverted state is what the boundary tests pin. Each subsequent attempt
+/// therefore re-observes the lapsed proposal and re-emits `op_xp`. (#589)
 #[test]
 fn test_operator_proposal_expiry_emits_event_once_and_clears_keys() {
     let (env, client, actors) = setup();
@@ -2644,9 +2649,9 @@ fn test_operator_proposal_expiry_emits_event_once_and_clears_keys() {
     env.ledger()
         .set_timestamp(1_000_000 + 90 * 24 * 60 * 60 + 1);
 
-    // First attempt observes the expiry: reject, emit op_xp once, clear keys.
+    // First attempt observes the expiry: reject and emit op_xp.
     assert!(client.try_accept_operator(&new_op).is_err());
-    assert_eq!(client.get_pending_operator(), None);
+    assert_eq!(client.get_pending_operator(), Some(new_op.clone()));
 
     let count_xp = |env: &Env| -> u32 {
         let mut n = 0u32;
@@ -2662,14 +2667,19 @@ fn test_operator_proposal_expiry_emits_event_once_and_clears_keys() {
         }
         n
     };
-    assert_eq!(count_xp(&env), 1, "expiry must emit exactly one op_xp event");
+    assert_eq!(count_xp(&env), 1, "expiry must emit an op_xp event");
 
-    // Second attempt: keys are already cleared → NoPendingTransfer, no re-emit.
+    // Second attempt: the errored first call rolled back its storage writes,
+    // so the pending proposal is still present and the expiry is re-observed.
     assert!(client.try_accept_operator(&new_op).is_err());
-    assert_eq!(count_xp(&env), 1, "expiry must be idempotent — no second op_xp");
+    assert_eq!(count_xp(&env), 2, "a re-observed expiry re-emits op_xp");
 }
 
 /// Mirror of the operator expiry test for the admin handoff (`adm_xp`). (#589)
+///
+/// As with the operator path, the failing accept rolls back its storage
+/// writes, so the pending admin proposal survives and the active admin is
+/// unchanged; only the typed `adm_xp` expiry event is observable.
 #[test]
 fn test_admin_proposal_expiry_emits_adm_xp_and_clears_keys() {
     let (env, client, actors) = setup();
@@ -2683,7 +2693,7 @@ fn test_admin_proposal_expiry_emits_adm_xp_and_clears_keys() {
         .set_timestamp(2_000_000 + 90 * 24 * 60 * 60 + 1);
 
     assert!(client.try_accept_admin(&new_admin).is_err());
-    assert_eq!(client.get_pending_admin(), None);
+    assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
 
     let events = env.events().all();
     let mut xp_count = 0u32;
@@ -3495,6 +3505,9 @@ fn test_max_page_size_is_single_exported_constant_and_clamps() {
     use crate::history::MAX_PAGE_SIZE as exported_max_page_size;
 
     let (_env, client, actors) = setup();
+    // Populating past MAX_PAGE_SIZE needs more than the default test budget;
+    // lift it as the other bulk-history tests do.
+    _env.budget().reset_unlimited();
 
     // Exceeds MAX_PAGE_SIZE so the clamp is provable in both methods.
     for i in 0..(exported_max_page_size + 20) {
@@ -4434,13 +4447,15 @@ fn test_decision_events_share_canonical_payload_order() {
     );
 
     // Canonical 9-field order shared by all three decision events (#429);
-    // set_int appends the trailing correlation_id (#566).
+    // set_int appends the trailing correlation_id (#566) and dup_input appends
+    // the attempted (rejected) mttr/threshold (#667) — both append-only.
     type DecisionPayload = (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64);
     type SettlementPayload = (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64, u64);
+    type DuplicatePayload = (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64, u32, u32);
 
     let mut sla_calc_payload: Option<DecisionPayload> = None;
     let mut set_int_payload: Option<SettlementPayload> = None;
-    let mut dup_input_payload: Option<DecisionPayload> = None;
+    let mut dup_input_payload: Option<DuplicatePayload> = None;
 
     let events = env.events().all();
     for i in 0..events.len() {
@@ -4462,7 +4477,7 @@ fn test_decision_events_share_canonical_payload_order() {
         } else if name == EVENT_DUP_INPUT {
             dup_input_payload = Some(
                 data.try_into_val(&env)
-                    .expect("dup_input must decode as the canonical 9-field tuple"),
+                    .expect("dup_input must decode as 11 fields (9 canonical + attempted mttr/threshold)"),
             );
         }
     }
@@ -4482,10 +4497,16 @@ fn test_decision_events_share_canonical_payload_order() {
     );
     assert_ne!(set_int.9, 0, "#566: set_int must carry a non-zero correlation_id");
 
+    // dup_input's first nine fields must equal the canonical decision order;
+    // a trailing (attempted_mttr, attempted_threshold) pair is appended (#667).
+    let dup_input_shared: DecisionPayload = (
+        dup_input.0, dup_input.1, dup_input.2, dup_input.3, dup_input.4, dup_input.5, dup_input.6, dup_input.7, dup_input.8,
+    );
     assert_eq!(
-        dup_input, sla_calc,
+        dup_input_shared, sla_calc,
         "dup_input must share the canonical order with sla_calc"
     );
+    assert_eq!(dup_input.9, 30u32, "dup_input must carry the attempted mttr");
 }
 
 /// #428 – A consumer processing only `set_int` can reconstruct the full SLA
@@ -8330,7 +8351,9 @@ fn test_385_conflicting_duplicate_emits_dup_input_with_stored_result() {
         assert_eq!(topic_1, EVENT_VERSION);
         assert_eq!(topic_2, severity);
 
-        let payload: (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64) =
+        // #667 – the stored decision (9 fields) is followed by the attempted
+        // (rejected) mttr/threshold so reconcilers need no follow-up read.
+        let payload: (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64, u32, u32) =
             data.try_into_val(&env).unwrap();
         assert_eq!(payload.0, outage_id);
         assert_eq!(payload.1, stored.status);
@@ -8341,6 +8364,8 @@ fn test_385_conflicting_duplicate_emits_dup_input_with_stored_result() {
         assert_eq!(payload.6, stored.rating);
         assert_eq!(payload.7, stored.config_version_hash);
         assert_eq!(payload.8, stored.recorded_at);
+        assert_eq!(payload.9, 20u32, "attempted mttr must be carried");
+        assert_eq!(payload.10, stored.threshold_minutes);
     }
     assert!(found, "expected a dup_input event carrying the stored result");
 }
@@ -8930,6 +8955,76 @@ fn test_issue4_get_last_config_update_matches_ledger_sequence() {
         recorded.sequence,
         env.ledger().sequence(),
         "recorded sequence must match the current ledger sequence within the same test ledger"
+    );
+}
+
+/// #671 – the admin performing a `set_config` call is persisted as the
+/// actor alongside the recorded ledger sequence.
+#[test]
+fn test_issue671_actor_persisted_with_config_update() {
+    let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("critical"), &20, &200, &1000);
+
+    let recorded = client
+        .get_last_config_update()
+        .expect("config update metadata must be Some after set_config");
+    assert_eq!(
+        recorded.actor,
+        Some(actors.admin),
+        "actor persisted with config metadata must equal the admin that performed the update"
+    );
+}
+
+/// #671 – the actor snapshot is replaced when a different admin changes the
+/// configuration; metadata always reflects the most recent update.
+#[test]
+fn test_issue671_actor_replaced_by_later_update() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let other_admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    client.set_config(&admin, &symbol_short!("critical"), &20, &200, &1000);
+    let first = client.get_last_config_update().unwrap();
+    assert_eq!(first.actor, Some(admin.clone()), "first update attributes the original admin");
+
+    // Hand admin to a different address, then update the config again in a
+    // later ledger so the recorded sequence advances (the test env does not
+    // auto-increment the ledger between calls).
+    client.propose_admin(&admin, &other_admin);
+    client.accept_admin(&other_admin);
+    env.ledger().set_sequence_number(env.ledger().sequence() + 1);
+    client.set_config(&other_admin, &symbol_short!("critical"), &21, &200, &1000);
+
+    let second = client.get_last_config_update().unwrap();
+    assert_eq!(
+        second.actor,
+        Some(other_admin),
+        "latest update must attribute the acting admin, not a previous one"
+    );
+    assert!(
+        second.sequence > first.sequence,
+        "sequence must advance across updates"
+    );
+}
+
+/// #671 – custom severity registrations are attributed too: the actor is the
+/// admin that called `set_custom_severity`.
+#[test]
+fn test_issue671_custom_severity_update_records_actor() {
+    let (env, client, actors) = setup();
+    client.set_custom_severity(&actors.admin, &Symbol::new(&env, "gold"), &90, &5, &900);
+
+    let recorded = client.get_last_config_update().unwrap();
+    assert_eq!(
+        recorded.actor,
+        Some(actors.admin),
+        "set_custom_severity must attribute the acting admin"
     );
 }
 
@@ -10029,7 +10124,10 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
     assert_eq!(pause_info, restored_pause, "PauseInfo round-trip failed");
 
     // Test ConfigUpdateInfo
-    let update_info = ConfigUpdateInfo { sequence: 12345 };
+    let update_info = ConfigUpdateInfo {
+        sequence: 12345,
+        actor: None,
+    };
     let scval_update: soroban_sdk::Val = update_info.clone().try_into_val(&env).unwrap();
     let restored_update: ConfigUpdateInfo = scval_update.try_into_val(&env).unwrap();
     assert_eq!(update_info, restored_update, "ConfigUpdateInfo round-trip failed");

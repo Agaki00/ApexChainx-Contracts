@@ -105,6 +105,9 @@ pub(crate) const BYTES_PENDING_OP_TS_KEY: u64 = 24;
 pub(crate) const BYTES_PAUSE_INFO_KEY: u64 = 200;
 /// Overhead for the LCFGUPD key (u32, lazily created).
 pub(crate) const BYTES_LCFGUPD_KEY: u64 = 16;
+/// Overhead for the LCFGUPDA key (Address, lazily created on the first
+/// attributed config update, #671).
+pub(crate) const BYTES_LCFGUPDA_KEY: u64 = 80;
 /// Overhead for the ADMINRN key (boolean, lazily created).
 pub(crate) const BYTES_ADMINRN_KEY: u64 = 20;
 /// Overhead for the CFGREG key (Map, lazily created).
@@ -193,6 +196,9 @@ pub fn get_storage_footprint_estimate(env: &Env) -> Result<u64, SLAError> {
     }
     if inst.has(&crate::config_metadata::LAST_CFG_UPDATE_KEY) {
         footprint += BYTES_LCFGUPD_KEY;
+    }
+    if inst.has(&crate::config_metadata::LCFG_UPD_ACTOR_KEY) {
+        footprint += BYTES_LCFGUPDA_KEY;
     }
     if inst.has(&crate::ADMIN_RENOUNCED_KEY) {
         footprint += BYTES_ADMINRN_KEY;
@@ -283,8 +289,8 @@ mod tests {
         let initial_footprint = client.get_storage_footprint_estimate();
         // After initialize: every eagerly-written key plus the seeded (empty)
         // CUSTOM_CONFIG base. `HISTLEN` is written by initialize since #463 so
-        // it is counted here even before any calculations (#578).
-        // 80+80+800+20+160+32+32+32+32+16+16+32 = 1332 (+48 CUSTCFG base = 1380)
+        // it is counted here even before any calculations (#578). The sharded
+        // history meta base covers HISTH/HISTT/HISTLEN (#582).
         let expected_initial: u64 = BYTES_ADMIN_KEY
             + BYTES_OPERATOR_KEY
             + BYTES_CONFIG_KEY
@@ -295,8 +301,8 @@ mod tests {
             + BYTES_LAST_CALC_TS_KEY
             + BYTES_LAST_VIOL_TS_KEY
             + BYTES_STORAGE_VERSION_KEY
-            + BYTES_HISTORY_KEY_BASE
-            + BYTES_HISTORY_LEN_KEY
+            + BYTES_CFGCNT_KEY
+            + BYTES_HISTORY_META_BASE
             + BYTES_CUSTOM_CONFIG_KEY_BASE;
         assert_eq!(
             initial_footprint, expected_initial,
