@@ -10,8 +10,8 @@ Use it as a tracing hint. Join on network, contract, full outage ID and ledger;
 do not use the compact ID for authorization or deduplication. Zero is valid.
 
 SLA contract events keep three topics: name, per-name version, context.
-`correlation_event_topics` is an optional four-topic helper for downstream
-contracts, not the SLA topic ABI. Historical `set_int:v1` uses the old encoding
+The obsolete `correlation_event_topics` helper remains removed, as on main.
+Historical `set_int:v1` uses the old encoding
 and needs its own decoder.
 
 See [the encoding and migration guide](docs/EVENT_VERSION_MIGRATION.md) for the

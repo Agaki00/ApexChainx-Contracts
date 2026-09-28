@@ -45,7 +45,7 @@ and `u32::MAX`; bytes 4..8 contain the outage fingerprint.
 
 The Rust and TS tests share the vector `hello`, ledger 42 ->
 `0x0000002a4f9f2cab`. TS uses `bigint`. The `set_int` payload carries the ID;
-SLA topics remain three elements. The optional downstream four-topic helper
-does not change the SLA contract event schema.
+SLA topics remain three elements. Correlation travels in the payload; the
+obsolete four-topic helper remains removed.
 
 Upgrades from storage v3 chain through v4 actor-attribution compatibility first. Existing v4 actor metadata is preserved by the v5 stamp.
