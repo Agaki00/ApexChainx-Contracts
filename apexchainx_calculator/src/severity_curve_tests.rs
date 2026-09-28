@@ -6,7 +6,6 @@ mod severity_curve_tests {
     // away from the documentation.
     #![allow(clippy::module_inception)]
     use crate::{SLACalculatorContract, SLACalculatorContractClient};
-    use alloc::string::ToString;
     use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Symbol};
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
@@ -21,8 +20,11 @@ mod severity_curve_tests {
 
     /// Baseline config that satisfies every rule, used to bring storage into
     /// a state against which the cross-severity validators can be exercised.
+    ///
+    /// Writes run bottom-up (low → medium → high → critical) so every write
+    /// already satisfies the adjacent-pair ordering checks (#487): raising a
+    /// tier before its less-severe neighbour would otherwise be rejected.
     fn seed_baseline(client: &SLACalculatorContractClient<'_>, admin: &Address) {
-        // Raise thresholds from the bottom of the ladder, then lower penalties.
         client.set_config(admin, &symbol_short!("low"), &1440, &10, &500);
         client.set_config(admin, &symbol_short!("medium"), &240, &10, &500);
         client.set_config(admin, &symbol_short!("high"), &120, &50, &500);
@@ -40,8 +42,8 @@ mod severity_curve_tests {
         assert_eq!(
             client.try_set_config(admin, &sev, &t, &p, &r).map(|_| ()),
             Ok(()),
-            "expected accept for boundary ({}_{}_{}_{})",
-            sev.to_string(),
+            "expected accept for boundary ({:?}_{}_{}_{})",
+            alloc::string::ToString::to_string(&sev),
             t,
             p,
             r
@@ -58,8 +60,8 @@ mod severity_curve_tests {
     ) {
         assert!(
             client.try_set_config(admin, &sev, &t, &p, &r).is_err(),
-            "expected reject for boundary ({}_{}_{}_{})",
-            sev.to_string(),
+            "expected reject for boundary ({:?}_{}_{}_{})",
+            alloc::string::ToString::to_string(&sev),
             t,
             p,
             r
@@ -77,11 +79,13 @@ mod severity_curve_tests {
     fn test_general_bounds_threshold_via_client() {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
-        client.set_config(&admin, &symbol_short!("critical"), &1, &100, &500);
-        client.set_config(&admin, &symbol_short!("high"), &1, &50, &500);
-        client.set_config(&admin, &symbol_short!("medium"), &1, &25, &500);
-        accepts(&client, &admin, symbol_short!("low"), 1, 10, 100);
-        rejects(&client, &admin, symbol_short!("low"), 0, 10, 100);
+        // The general minimum (1) is reachable through set_config on the most
+        // severe tier: critical has no next-higher severity, so 1 only has to
+        // stay within its per-severity cap (≤ 60). Penalty must satisfy the
+        // critical floor (≥ 50). Using `low` here would violate the required
+        // critical ≤ high ≤ medium ≤ low ordering against the seeded defaults.
+        accepts(&client, &admin, symbol_short!("critical"), 1, 50, 100);
+        rejects(&client, &admin, symbol_short!("critical"), 0, 50, 100);
     }
 
     #[test]
@@ -106,7 +110,11 @@ mod severity_curve_tests {
     fn test_threshold_caps() {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
-        seed_baseline(&client, &admin);
+        // Establish a ladder that admits each tier at its cap: low 1440,
+        // medium 240, high 120, then critical 60.
+        client.set_config(&admin, &symbol_short!("low"), &1440, &10, &500);
+        client.set_config(&admin, &symbol_short!("medium"), &240, &10, &500);
+        client.set_config(&admin, &symbol_short!("high"), &120, &25, &500);
         accepts(&client, &admin, symbol_short!("critical"), 60, 50, 500);
         rejects(&client, &admin, symbol_short!("critical"), 61, 50, 500);
         accepts(&client, &admin, symbol_short!("high"), 120, 25, 500);
@@ -119,7 +127,11 @@ mod severity_curve_tests {
     fn test_penalty_floors() {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
-        seed_baseline(&client, &admin);
+        // Establish the same bottom-up ladder as `test_threshold_caps` so each
+        // tier can be exercised at its penalty floor.
+        client.set_config(&admin, &symbol_short!("low"), &1440, &10, &500);
+        client.set_config(&admin, &symbol_short!("medium"), &240, &10, &500);
+        client.set_config(&admin, &symbol_short!("high"), &120, &25, &500);
         accepts(&client, &admin, symbol_short!("critical"), 60, 50, 500);
         rejects(&client, &admin, symbol_short!("critical"), 60, 49, 500);
         accepts(&client, &admin, symbol_short!("high"), 120, 25, 500);
@@ -146,10 +158,16 @@ mod severity_curve_tests {
     fn test_reward_ratio_boundary() {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
-        seed_baseline(&client, &admin);
-        // 30 * 3 = 90: reward 46 is accepted, reward 45 is rejected.
-        accepts(&client, &admin, symbol_short!("medium"), 240, 30, 46);
-        rejects(&client, &admin, symbol_short!("medium"), 240, 30, 45);
+        // Raise the ladder (low 1440, medium 240, high 120) so a medium penalty
+        // of 60 sits within the cross-severity ordering (high ≥ medium ≥ low).
+        client.set_config(&admin, &symbol_short!("low"), &1440, &10, &500);
+        client.set_config(&admin, &symbol_short!("medium"), &240, &25, &500);
+        client.set_config(&admin, &symbol_short!("high"), &120, &60, &500);
+        // Rule (docs/SEVERITY_CURVES.md): reject when penalty * 3 >= reward * 2.
+        // For penalty 60: 3 * 60 = 180, so reward 90 gives 180 >= 180 → reject
+        // and reward 91 gives 180 >= 182 false → accept.
+        accepts(&client, &admin, symbol_short!("medium"), 240, 60, 91);
+        rejects(&client, &admin, symbol_short!("medium"), 240, 60, 90);
     }
 
     // ── Cross-severity ordering (critical ≥ high ≥ medium; low exempt) ─

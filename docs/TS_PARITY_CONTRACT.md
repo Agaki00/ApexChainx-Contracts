@@ -77,7 +77,7 @@ assert them. Do not add them to `contractSemantics.ts` or the fixture.
 | File | Why it is out of contract |
 |---|---|
 | `governanceEvents.ts` | An in-memory event log with its own kind vocabulary (`admin_proposed`, `governance_locked`, …). The contract emits `adm_prop` / `adm_acc` / `adm_ren` / `op_prop` / `op_acc` / `op_can` / `cfg_frz` / `cfg_unfrz` topics with different names and no `metadata` field. This models a backend's own aggregation, not the chain's events. If it is ever meant to mirror the contract, that is a separate change — and it joins the table above. |
-| `configUpdateMeta.ts` | Tracks an actor and an update counter that the contract does not store. The contract records a *timestamp* only (`config_metadata::record_config_update`). |
+| `configUpdateMeta.ts` | Tracks an actor and an update counter that the contract does not store. Since storage v4 (#671) the contract does persist an actor with the most recent config update (`get_last_config_update().actor`), but it records a *single* last-update metadata slot — not a per-update history with a monotonic counter — and it keys the actor off the authorized admin, not an arbitrary string. The in-memory mirror remains an off-chain convenience. |
 | `aggregateReadHelper.ts` | Bundles several reads into one backend-side snapshot. Its `SeverityConfig` uses `threshold_seconds` / `reward_bps` / `penalty_bps`; the contract's `SLAConfig` uses `threshold_minutes` / `penalty_per_minute` / `reward_base`. Different units, different fields, by design. |
 | `upgradeGuardTests.ts` | A standalone scratch harness, not a mirror. |
 

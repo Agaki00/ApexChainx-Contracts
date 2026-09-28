@@ -292,8 +292,8 @@ pub const EVENT_ABI_TO_SCHEMA_VERSION: &[u32] = &[1, 2];
 
 /// Storage requirements are independent of result schema numbers: storage was
 /// already v3 before event ABI generation 2, so requiring merely v2 would not
-/// enforce a storage co-bump. Generation 2 must acknowledge storage v4 (#497).
-pub const EVENT_ABI_TO_STORAGE_VERSION: &[u32] = &[1, 4];
+/// enforce a storage co-bump. Generation 2 must acknowledge storage v5 (#497).
+pub const EVENT_ABI_TO_STORAGE_VERSION: &[u32] = &[1, 5];
 
 /// Event name constants — these form topic[0] of every event.
 pub const EVENT_SLA_CALC: Symbol = symbol_short!("sla_calc");

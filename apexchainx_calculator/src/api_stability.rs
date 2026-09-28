@@ -84,7 +84,7 @@ pub fn canonical_field_counts() -> [(&'static str, u32); 32] {
         ("EconomicExposure", 3),
         ("SeverityTelemetry", 4),
         ("PauseInfo", 3),
-        ("ConfigUpdateInfo", 1),
+        ("ConfigUpdateInfo", 2),
         ("StorageVersionInfo", 3),
         ("FailureCode", 3),
         ("FailureSchema", 2),
@@ -157,11 +157,11 @@ pub fn event_name_symbols() -> [&'static str; 26] {
 /// Additions to this set MUST coincide with a `STORAGE_VERSION` bump —
 /// enforced by `storage_key_invariant_tests::`
 /// `test_storage_key_set_pinned_to_version_snapshot_or_newer` (#602).
-pub fn storage_key_symbols() -> [&'static str; 27] {
+pub fn storage_key_symbols() -> [&'static str; 28] {
     [
         "ADMIN", "OPERATOR", "PADMIN", "POP", "PADMINTS", "POPTS", "CONFIG", "CUSTCFG", "PAUSED", "PAUSEINF",
         "STATS", "CALCCNT", "VIOLCNT", "CALCTS", "VIOLTS", "HIST", "HISTLEN", "CFGCNT", "VER", "RETLIM",
-        "TPRUNED", "TTOTENT", "LCFGUPD", "HISTE", "HISTI", "HISTH", "HISTT",
+        "TPRUNED", "TTOTENT", "LCFGUPD", "LCFGUPDA", "HISTE", "HISTI", "HISTH", "HISTT",
     ]
 }
 
@@ -182,7 +182,7 @@ pub fn assess_stability() -> StabilityScore {
     }
 
     // Check storage key symbols are at expected count.
-    if storage_key_symbols().len() != 27 {
+    if storage_key_symbols().len() != 28 {
         return StabilityScore::C;
     }
 
@@ -335,7 +335,7 @@ mod tests {
     #[test]
     fn test_225_storage_keys_are_distinct() {
         let keys = storage_key_symbols();
-        let expected = 27;
+        let expected = 28;
 
         assert_eq!(
             keys.len(),

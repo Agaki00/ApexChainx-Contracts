@@ -25,7 +25,7 @@ use crate::{SLACalculatorContract, SLAError, RESULT_SCHEMA_VERSION, STORAGE_VERS
 
 /// Schema version of the `ContractInfo` struct itself.
 /// Increment when fields are added, removed, or reordered.
-pub const CONTRACT_INFO_SCHEMA_VERSION: u32 = 2;
+pub const CONTRACT_INFO_SCHEMA_VERSION: u32 = 3;
 
 /// #424 – Single source of truth for the advertised feature set.
 ///

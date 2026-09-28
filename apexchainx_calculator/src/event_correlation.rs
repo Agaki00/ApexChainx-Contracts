@@ -9,13 +9,10 @@
 //! The SLA contract carries the ID in the trailing `set_int` payload field,
 //! retaining its three topics (name, per-name version, context).
 
-use soroban_sdk::{symbol_short, Env, Symbol, SymbolStr, TryFromVal};
+use soroban_sdk::{Env, Symbol, SymbolStr, TryFromVal};
 
 /// A ledger-bound tracing hint, with possible within-ledger hash collisions.
 pub type CorrelationId = u64;
-/// Topic name reserved for downstream correlated events.
-pub const CORRELATION_TOPIC: Symbol = symbol_short!("corr_id");
-
 /// Encode the supplied ledger, independently of the environment's current ledger.
 /// Fingerprint: FNV-1a-32, offset 2166136261, prime 16777619, raw symbol bytes.
 pub fn generate_correlation_id(env: &Env, outage_id: &Symbol, ledger_sequence: u32) -> CorrelationId {
@@ -30,20 +27,11 @@ pub fn generate_correlation_id(env: &Env, outage_id: &Symbol, ledger_sequence: u
     (u64::from(ledger_sequence) << 32) | u64::from(fingerprint)
 }
 
-/// Optional downstream format, not the SLA event ABI. Zero is not a sentinel.
-pub fn correlation_event_topics(
-    event_name: Symbol,
-    event_version: Symbol,
-    context: Symbol,
-    correlation_id: CorrelationId,
-) -> (Symbol, Symbol, Symbol, u64) {
-    (event_name, event_version, context, correlation_id)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use soroban_sdk::symbol_short;
 
     #[test]
     fn ledger_is_structural_and_repeated_submissions_are_identical() {

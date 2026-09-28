@@ -1,5 +1,7 @@
 # Full-suite failure repairs
 
+Historical evidence for commit `3555a2a`. Current main subsequently removed the thirteen orphan modules; the conflict resolution adopts those deletions instead of reintroducing the helpers. Current CI is authoritative for the integrated branch.
+
 The first release-validation run completed with 790 passed, three failed and five ignored. The targeted issue checks had passed, so the release-preflight acceptance workflow now runs the entire Rust library suite as well as checking generated freshness.
 
 - Declare all thirteen orphan modules; no lint exemptions or ignored tests were added. Repair their previously uncompiled SDK/module imports, use canonical sharded history for duplicate scans and invariants, and check feasibility examples against the real validator.

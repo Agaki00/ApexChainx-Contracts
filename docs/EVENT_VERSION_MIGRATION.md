@@ -1,8 +1,8 @@
 # Event ABI generation 2 (#675, #677)
 
-The global event ABI is `v2` / generation 2, storage version is 4, and result
+The global event ABI is `v2` / generation 2, storage version is 5, and result
 schema version is 2. The #497 minimum-schema co-bump guard remains active.
-Storage migration 3 -> 4 is an explicit admin acknowledgement with no data
+Storage migration 4 -> 5 is an explicit admin acknowledgement with no data
 rewrite. Older migration steps still run first; repeat migration is a no-op.
 The result field layout is unchanged in this coordinated schema release.
 
@@ -47,3 +47,5 @@ The Rust and TS tests share the vector `hello`, ledger 42 ->
 `0x0000002a4f9f2cab`. TS uses `bigint`. The `set_int` payload carries the ID;
 SLA topics remain three elements. The optional downstream four-topic helper
 does not change the SLA contract event schema.
+
+Upgrades from storage v3 chain through v4 actor-attribution compatibility first. Existing v4 actor metadata is preserved by the v5 stamp.

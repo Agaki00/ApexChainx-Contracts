@@ -826,36 +826,45 @@ fn parity_manifest_has_no_unaccounted_methods() {
 }
 
 #[test]
-fn event_abi_v2_migration_preserves_v3_history_and_is_idempotent() {
-    let mut env = Env::default();
-    env.set_config(EnvTestConfig {
-        capture_snapshot_at_drop: false,
-    });
-    env.mock_all_auths();
-    let id = env.register_contract(None, SLACalculatorContract);
-    let client = SLACalculatorContractClient::new(&env, &id);
-    let admin = Address::generate(&env);
-    let operator = Address::generate(&env);
-    client.initialize(&admin, &operator);
-    client.calculate_sla(
-        &operator,
-        &symbol_short!("migrate"),
-        &symbol_short!("critical"),
-        &5,
-    );
-    let before = client.get_history_page(&0, &10);
-    env.as_contract(&id, || {
-        env.storage().instance().set(&crate::STORAGE_VERSION_KEY, &3u32);
-    });
-    client.migrate(&admin);
-    assert_eq!(client.get_storage_version(), crate::STORAGE_VERSION);
-    assert_eq!(client.get_history_page(&0, &10), before);
-    client.migrate(&admin);
-    assert_eq!(client.get_history_page(&0, &10), before);
-    assert_eq!(
-        client.get_result_schema().schema_version,
-        crate::RESULT_SCHEMA_VERSION
-    );
+fn event_abi_v2_migration_preserves_v3_v4_history_and_is_idempotent() {
+    for source_version in [3u32, 4u32] {
+        let mut env = Env::default();
+        env.set_config(EnvTestConfig {
+            capture_snapshot_at_drop: false,
+        });
+        env.mock_all_auths();
+        let id = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        let operator = Address::generate(&env);
+        client.initialize(&admin, &operator);
+        client.calculate_sla(
+            &operator,
+            &symbol_short!("migrate"),
+            &symbol_short!("critical"),
+            &5,
+        );
+        if source_version == 4 {
+            client.set_config(&admin, &symbol_short!("critical"), &16, &100, &500);
+        }
+        let metadata_before = client.get_last_config_update();
+        let before = client.get_history_page(&0, &10);
+        env.as_contract(&id, || {
+            env.storage()
+                .instance()
+                .set(&crate::STORAGE_VERSION_KEY, &source_version);
+        });
+        client.migrate(&admin);
+        assert_eq!(client.get_storage_version(), crate::STORAGE_VERSION);
+        assert_eq!(client.get_last_config_update(), metadata_before);
+        assert_eq!(client.get_history_page(&0, &10), before);
+        client.migrate(&admin);
+        assert_eq!(client.get_history_page(&0, &10), before);
+        assert_eq!(
+            client.get_result_schema().schema_version,
+            crate::RESULT_SCHEMA_VERSION
+        );
+    }
 }
 
 /// A maximum-length outage and the longest rating exercise the variable widths.

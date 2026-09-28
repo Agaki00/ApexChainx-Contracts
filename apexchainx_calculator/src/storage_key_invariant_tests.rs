@@ -22,15 +22,25 @@ const KEYS_AT_V2: [&str; 22] = [
 ];
 
 /// The reserved instance-storage key set as of `STORAGE_VERSION` 3, which adds
-/// `CONFIG_COUNT_KEY` (cached config count for issue #606).
-const KEYS_AT_V3: [&str; 23] = [
+/// the sharded history meta keys `HISTE`/`HISTI`/`HISTH`/`HISTT` (#580/#581/#582)
+/// and `CONFIG_COUNT_KEY` (cached config count for issue #606).
+const KEYS_AT_V3: [&str; 27] = [
     "ADMIN", "OPERATOR", "PADMIN", "POP", "PADMINTS", "POPTS", "CONFIG", "CUSTCFG", "PAUSED", "PAUSEINF",
     "STATS", "CALCCNT", "VIOLCNT", "CALCTS", "VIOLTS", "HIST", "HISTLEN", "CFGCNT", "VER", "RETLIM",
-    "TPRUNED", "TTOTENT", "LCFGUPD",
+    "TPRUNED", "TTOTENT", "LCFGUPD", "HISTE", "HISTI", "HISTH", "HISTT",
+];
+
+/// The reserved instance-storage key set as of `STORAGE_VERSION` 4, which adds
+/// `LCFGUPDA` (config-update actor attribution, #671) on top of the v3 set.
+const KEYS_AT_V4: [&str; 28] = [
+    "ADMIN", "OPERATOR", "PADMIN", "POP", "PADMINTS", "POPTS", "CONFIG", "CUSTCFG", "PAUSED", "PAUSEINF",
+    "STATS", "CALCCNT", "VIOLCNT", "CALCTS", "VIOLTS", "HIST", "HISTLEN", "CFGCNT", "VER", "RETLIM",
+    "TPRUNED", "TTOTENT", "LCFGUPD", "LCFGUPDA", "HISTE", "HISTI", "HISTH", "HISTT",
 ];
 
 /// The `STORAGE_VERSION` the snapshot above was observed at.
-const SNAPSHOT_STORAGE_VERSION: u32 = 3;
+// v5 changes the ABI generation but retains the v4 storage-key set.
+const SNAPSHOT_STORAGE_VERSION: u32 = 5;
 
 #[test]
 fn test_storage_key_set_pinned_to_version_snapshot_or_newer() {
@@ -42,9 +52,11 @@ fn test_storage_key_set_pinned_to_version_snapshot_or_newer() {
     // check is exact equality against the snapshot, not just containment.
     let current = crate::api_stability::storage_key_symbols();
 
-    let matches_snapshot = current.len() == KEYS_AT_V3.len()
-        && KEYS_AT_V3.iter().all(|k| current.contains(k))
-        && current.iter().all(|k| KEYS_AT_V3.contains(k));
+    assert!(KEYS_AT_V3.iter().all(|key| KEYS_AT_V4.contains(key)));
+    assert_eq!(KEYS_AT_V4.len(), KEYS_AT_V3.len() + 1);
+    let matches_snapshot = current.len() == KEYS_AT_V4.len()
+        && KEYS_AT_V4.iter().all(|k| current.contains(k))
+        && current.iter().all(|k| KEYS_AT_V4.contains(k));
 
     assert!(
         matches_snapshot || STORAGE_VERSION > SNAPSHOT_STORAGE_VERSION,
