@@ -81,6 +81,13 @@ contract and migrating state through the backend.
 
 This repository is the execution-layer side of the 3-repo architecture.
 
+## Documentation
+
+**→ [Documentation Index](docs/INDEX.md)** — the single navigation entry point for
+every doc in the repository. It classifies each file as a **current reference**,
+a **design note**, **superseded**, or **archived**, and links each one to the
+code-adjacent source of truth. Start there before reading any other doc.
+
 ## Contract API Archetypes
 
 Every public entrypoint in `apexchainx_calculator` belongs to one of three
