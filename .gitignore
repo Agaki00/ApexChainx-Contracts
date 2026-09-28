@@ -19,12 +19,12 @@ apexchainx_calculator/test_snapshots/tests/*.json.tmp
 *.wasm
 
 # IDE
-.vscode/
 .idea/
 *.swp
 *.swo
 
 # OS
+temp_auto_push.bat
 .DS_Store
 Thumbs.db
 
@@ -51,3 +51,5 @@ node_modules/
 validation-results/
 
 /offchain/readCostMeasurements.json
+.gitignore
+branch_structure.json
